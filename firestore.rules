@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isPlatformOwner() {
+      return isAuthenticated() && (
+        request.auth.token.email.lower() == 'editpeakstudio@gmail.com' ||
+        request.auth.token.email.lower() == 'janusahani1990@gmail.com'
+      );
+    }
+
+    function isMasterAdmin() {
+      return isPlatformOwner() || (
+        isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master_admin' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true
+      );
+    }
+
+    function isAdmin() {
+      return isMasterAdmin() || (
+        isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true
+      );
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Prevent self-elevation to admin, master_admin, or granting permissions
+      allow create: if isOwner(userId) && 
+        request.resource.data.role == 'user' && 
+        request.resource.data.hasAllAccess == false &&
+        (request.resource.data.permissions == null || request.resource.data.permissions.size() == 0);
+
+      allow update: if isPlatformOwner() || (
+        isAdmin() && 
+        // Normal admins cannot modify the protected owner account
+        resource.data.email.lower() != 'editpeakstudio@gmail.com'
+      ) || (
+        isOwner(userId) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.hasAllAccess == resource.data.hasAllAccess &&
+        request.resource.data.allowedCategories == resource.data.allowedCategories &&
+        request.resource.data.subscriptionStatus == resource.data.subscriptionStatus &&
+        request.resource.data.isSuspended == resource.data.isSuspended
+      );
+
+      allow delete: if isPlatformOwner();
+    }
+
+    // Dynamic Folders & Subfolders Collection
+    match /folders/{folderId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Categories / Suites Collection
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Video Lessons Collection
+    match /videos/{videoId} {
+      allow read: if resource.data.isPublished == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // PDF Resources Collection
+    match /pdfs/{pdfId} {
+      allow read: if resource.data.isPublished == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Security Audit Logs Collection (Immutable)
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() || isPlatformOwner();
+      allow update, delete: if false; // Audit logs can never be altered or deleted!
+    }
+
+    // Payment Proof Submissions
+    match /paymentRequests/{requestId} {
+      allow create: if isAuthenticated() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // Alias payment_requests for compatibility
+    match /payment_requests/{requestId} {
+      allow create: if isAuthenticated() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // Settings Collection
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isMasterAdmin() || isPlatformOwner();
+    }
+
+    // Sales Analytics Collection
+    match /sales_analytics/{saleId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

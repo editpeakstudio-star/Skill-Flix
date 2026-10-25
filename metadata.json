@@ -1,0 +1,6 @@
+{
+  "name": "Skill-Flix",
+  "description": "Premium video editing masterclasses and learning platform with secure admin management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
