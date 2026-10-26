@@ -33,7 +33,7 @@ type AuthMethod = 'google' | 'phone' | 'email';
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { showToast } = useToast();
-  const [authMethod, setAuthMethod] = useState<AuthMethod>('email');
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('google');
 
   // Email form state
   const [isRegister, setIsRegister] = useState(false);
@@ -214,7 +214,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-150">
-      <div className="relative w-full max-w-md bg-[#090D18] border border-blue-500/25 rounded-2xl sm:rounded-3xl shadow-2xl p-5 sm:p-6 text-slate-100 my-8">
+      <div className="relative w-full max-w-4xl bg-[#050B1B] border border-blue-500/50 rounded-[28px] sm:rounded-[36px] shadow-[0_0_55px_rgba(29,78,216,0.16)] p-6 sm:p-10 text-slate-100 my-5">
         
         {/* Invisible Recaptcha Anchor */}
         <div id="recaptcha-verifier-box" />
@@ -229,79 +229,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         </button>
 
         {/* Header Branding */}
-        <div className="text-center mb-5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center mx-auto mb-2.5 shadow-lg shadow-blue-500/30">
-            <Lock className="w-5 h-5 text-white" />
+        <div className="text-center mb-7">
+          <div className="w-20 h-20 rounded-[26px] bg-gradient-to-br from-cyan-400 via-blue-600 to-purple-600 flex items-center justify-center mx-auto mb-5 shadow-[0_0_38px_rgba(59,130,246,0.5)] ring-1 ring-white/20">
+            <svg className="w-10 h-10 text-cyan-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"><path d="m8 5 12 7-12 7V5Z" /></svg>
           </div>
-          <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
+          <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
             {isForgotPassword 
               ? 'Reset Password' 
               : isRegister 
                 ? 'Create Your Skill-Flix Account' 
                 : 'Sign In to Skill-Flix'}
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Choose your preferred sign-in method to access your masterclasses.
+          <p className="text-sm sm:text-lg text-slate-400 mt-3">
+            Choose how you want to continue
           </p>
         </div>
-
-        {/* 3 Login Options Switcher Tabs */}
-        {!isForgotPassword && (
-          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#05070D] border border-white/[0.08] mb-4">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => { setAuthMethod('google'); setErrorMessage(null); }}
-              className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMethod === 'google'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-                <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"/>
-                <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"/>
-                <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.2-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z"/>
-                <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.4C3.7 20.1 7.5 23 12 23z"/>
-              </svg>
-              <span>Google</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                setAuthMethod('phone');
-                setErrorMessage(null);
-                setPhoneNumber('');
-                setOtpSent(false);
-                setOtpCode('');
-              }}
-              className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMethod === 'phone'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Phone OTP</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => { setAuthMethod('email'); setErrorMessage(null); }}
-              className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMethod === 'email'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Mail className="w-3.5 h-3.5" />
-              <span>Email</span>
-            </button>
-          </div>
-        )}
 
         {/* Error Alert Box */}
         {errorMessage && (
@@ -311,159 +253,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           </div>
         )}
 
-        {/* METHOD 1: GOOGLE AUTH */}
-        {authMethod === 'google' && !isForgotPassword && (
-          <div className="space-y-4 py-2">
-            <p className="text-xs text-slate-300 text-center">
-              Sign in with your Google account for instantaneous, secure access without needing passwords.
-            </p>
-
+        {/* Reference-style Google button and OR divider */}
+        {!isForgotPassword && (
+          <div className="mb-2">
             <button
               type="button"
               disabled={loading}
               onClick={handleGoogleLogin}
-              className="w-full py-3 px-4 rounded-xl bg-white hover:bg-slate-100 disabled:opacity-50 text-slate-900 font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full rounded-2xl border-2 border-cyan-400 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 px-4 py-4 text-white shadow-[0_0_24px_rgba(37,99,235,0.25)] transition hover:brightness-110 disabled:opacity-60"
             >
-              {loading ? (
-                <div className="w-4 h-4 border-2 border-slate-900/30 border-t-slate-900 rounded-full animate-spin" />
-              ) : (
-                <>
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"/>
-                    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"/>
-                    <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.2-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z"/>
-                    <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.4C3.7 20.1 7.5 23 12 23z"/>
-                  </svg>
-                  <span>Continue with Google</span>
-                </>
-              )}
+              <span className="flex min-h-[34px] items-center justify-center gap-4 text-base sm:text-lg font-bold">
+                {loading ? (
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  <>
+                    <svg className="h-8 w-8 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"/>
+                      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"/>
+                      <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.2-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z"/>
+                      <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.4C3.7 20.1 7.5 23 12 23z"/>
+                    </svg>
+                    <span>Continue with Google</span>
+                  </>
+                )}
+              </span>
             </button>
-          </div>
-        )}
 
-        {/* METHOD 2: PHONE NUMBER OTP */}
-        {authMethod === 'phone' && !isForgotPassword && (
-          <div className="space-y-3.5">
-            {!otpSent ? (
-              <form onSubmit={handleSendOtp} className="space-y-3.5">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Mobile Phone Number
-                  </label>
-                  <div className="flex items-center rounded-xl bg-[#05070D] border border-white/[0.08] focus-within:border-blue-500 overflow-hidden transition-all">
-                    {/* Separate Country Code Prefix */}
-                    <div className="flex items-center gap-1.5 px-3 py-2.5 bg-white/[0.03] border-r border-white/[0.08] text-slate-300 select-none shrink-0">
-                      <span className="text-sm">🇮🇳</span>
-                      <span className="font-mono text-xs font-bold text-white">+91</span>
-                    </div>
-
-                    {/* Clean Phone Number Input */}
-                    <div className="relative flex-1">
-                      <input
-                        type="tel"
-                        inputMode="numeric"
-                        autoComplete="tel-national"
-                        required
-                        value={phoneNumber}
-                        onChange={(e) => {
-                          const digitsOnly = e.target.value.replace(/[^0-9]/g, '').slice(0, 10);
-                          setPhoneNumber(digitsOnly);
-                        }}
-                        placeholder="Enter your mobile number"
-                        className="w-full bg-transparent px-3 py-2.5 text-xs text-white placeholder:text-slate-600 outline-none font-mono"
-                      />
-                    </div>
-                  </div>
-                  <span className="text-[10px] text-slate-500 mt-1.5 block">
-                    We will send a 6-digit OTP code to verify your number.
-                  </span>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {loading ? (
-                    <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <span>Send 6-Digit OTP</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyOtp} className="space-y-3.5">
-                <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-center justify-between text-xs text-blue-300">
-                  <span className="font-mono">+91 {phoneNumber}</span>
-                  <button
-                    type="button"
-                    onClick={() => { setOtpSent(false); setOtpCode(''); }}
-                    className="text-xs text-cyan-400 hover:underline cursor-pointer"
-                  >
-                    Change Number
-                  </button>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Enter 6-Digit OTP Code
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      maxLength={6}
-                      required
-                      autoFocus
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
-                      placeholder="123456"
-                      className="w-full bg-[#05070D] border border-white/[0.08] focus:border-blue-500 rounded-xl pl-9 pr-3 py-2.5 text-center tracking-widest text-base font-bold text-white placeholder:text-slate-600 outline-none font-mono"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || otpCode.length !== 6}
-                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {loading ? (
-                    <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Verify OTP & Sign In</span>
-                    </>
-                  )}
-                </button>
-
-                <div className="text-center pt-1">
-                  {resendCountdown > 0 ? (
-                    <span className="text-[11px] text-slate-500">
-                      Resend OTP in {resendCountdown}s
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleSendOtp}
-                      className="text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer"
-                    >
-                      Resend OTP Code
-                    </button>
-                  )}
-                </div>
-              </form>
-            )}
+            <div className="my-7 flex items-center gap-5 text-base font-medium text-slate-400">
+              <span className="h-px flex-1 bg-blue-300/40" />
+              <span>OR</span>
+              <span className="h-px flex-1 bg-blue-300/40" />
+            </div>
           </div>
         )}
 
         {/* METHOD 3: EMAIL & PASSWORD (LOGIN / REGISTER / FORGOT) */}
-        {(authMethod === 'email' || isForgotPassword) && (
-          <form onSubmit={handleEmailSubmit} className="space-y-3.5">
+        {true && (
+          <form onSubmit={handleEmailSubmit} className="space-y-5">
             {isRegister && !isForgotPassword && (
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">Full Name</label>
@@ -482,7 +308,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             )}
 
             <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">Email Address</label>
+              <label className="text-sm sm:text-base font-semibold text-slate-200 block mb-2">Email address</label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -490,8 +316,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@gmail.com"
-                  className="w-full bg-[#05070D] border border-white/[0.08] focus:border-blue-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder:text-slate-600 outline-none"
+                  placeholder="Enter your email address"
+                  className="w-full bg-[#050B1B]/90 border border-blue-400/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 rounded-2xl pl-12 pr-4 py-4 text-sm sm:text-base text-white placeholder:text-slate-500 outline-none transition-all"
                 />
               </div>
             </div>
@@ -499,7 +325,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             {!isForgotPassword && (
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-semibold text-slate-300">Password</label>
+                  <label className="text-sm sm:text-base font-semibold text-slate-200">Password</label>
                   {!isRegister && (
                     <button
                       type="button"
@@ -517,8 +343,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-[#05070D] border border-white/[0.08] focus:border-blue-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder:text-slate-600 outline-none"
+                    placeholder="Enter your password"
+                    className="w-full bg-[#050B1B]/90 border border-blue-400/40 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 rounded-2xl pl-12 pr-12 py-4 text-sm sm:text-base text-white placeholder:text-slate-500 outline-none transition-all"
                   />
                 </div>
               </div>
@@ -527,7 +353,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+              className="w-full mt-3 flex items-center justify-center gap-3 py-4 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:brightness-110 disabled:opacity-50 text-white text-base sm:text-lg font-bold shadow-[0_0_30px_rgba(59,130,246,0.3)] transition-all cursor-pointer"
             >
               {loading ? (
                 <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
