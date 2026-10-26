@@ -1,123 +1,210 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function owner() {
+      return signedIn()
+        && request.auth.token.email == 'editpeakstudio@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+    function hasUser() { return signedIn() && exists(userPath(request.auth.uid)); }
+    function profile() { return get(userPath(request.auth.uid)).data; }
+    function activeAdmin() {
+      return owner() || (hasUser()
+        && profile().role in ['admin', 'master_admin']
+        && profile().isSuspended != true);
+    }
+    function masterAdmin() {
+      return owner() || (hasUser() && profile().role == 'master_admin'
+        && profile().isSuspended != true);
+    }
+    function permitted(key) {
+      return masterAdmin() || (activeAdmin()
+        && profile().permissions is list
+        && profile().permissions.hasAny([key]));
+    }
+    function canManageUsers() { return permitted('students.manage'); }
+    function canManageAdmins() { return owner() || permitted('admins.manage'); }
+    function canVerifyPayments() { return permitted('payments.verify'); }
+    function canManageSettings() { return permitted('settings.manage'); }
+    function self(uid) { return signedIn() && request.auth.uid == uid; }
+    function validCategory(id) {
+      return request.resource.data.id == id
+        && request.resource.data.name is string
+        && request.resource.data.slug is string
+        && request.resource.data.thumbnailUrl is string
+        && request.resource.data.price is number
+        && request.resource.data.isActive is bool
+        && request.resource.data.createdAt is string;
+    }
+    function validFolder(id) {
+      return request.resource.data.id == id
+        && request.resource.data.name is string
+        && (request.resource.data.parentId == null || request.resource.data.parentId is string)
+        && request.resource.data.order is number
+        && request.resource.data.createdAt is string;
+    }
+    function validVideo(id) {
+      return request.resource.data.id == id
+        && request.resource.data.title is string
+        && request.resource.data.categoryId is string
+        && request.resource.data.videoUrl is string
+        && request.resource.data.isPublished is bool
+        && request.resource.data.isFreePreview is bool
+        && request.resource.data.order is number
+        && request.resource.data.createdAt is string;
+    }
+    function validPdf(id) {
+      return request.resource.data.id == id
+        && request.resource.data.title is string
+        && request.resource.data.categoryId is string
+        && request.resource.data.pdfUrl is string
+        && request.resource.data.isPublished is bool
+        && request.resource.data.order is number
+        && request.resource.data.pageCount is number
+        && request.resource.data.createdAt is string;
+    }
+    function ownsEntitlement(categoryId) {
+      return signedIn() && exists(userPath(request.auth.uid))
+        && (get(userPath(request.auth.uid)).data.hasAllAccess == true
+          || (get(userPath(request.auth.uid)).data.allowedCategories is list
+            && get(userPath(request.auth.uid)).data.allowedCategories.hasAny([categoryId])));
+    }
+    function canReadVideo() {
+      return activeAdmin() || (signedIn() && resource.data.isPublished == true
+        && (resource.data.isFreePreview == true || ownsEntitlement(resource.data.categoryId)));
+    }
+    function canReadPdf() {
+      return activeAdmin() || (signedIn() && resource.data.isPublished == true
+        && ownsEntitlement(resource.data.categoryId));
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    match /users/{uid} {
+      allow get: if self(uid) || activeAdmin();
+      allow list: if activeAdmin();
+      allow create: if (owner() && uid == request.auth.uid)
+        || (self(uid)
+          && request.resource.data.role == 'user'
+          && request.resource.data.permissions == []
+          && request.resource.data.isPlatformOwner == false
+          && request.resource.data.hasAllAccess == false
+          && request.resource.data.isSuspended == false
+          && request.resource.data.subscriptionStatus == 'none'
+          && request.resource.data.allowedCategories is list
+          && request.resource.data.allowedCategories.size() == 0
+          && request.resource.data.email == (request.auth.token.email == null ? '' : request.auth.token.email)
+          && request.resource.data.keys().hasOnly([
+            'email','displayName','photoURL','phoneNumber','role','isPlatformOwner',
+            'predefinedRole','assignedRoleTitle','permissions','isSuspended','hasAllAccess',
+            'allowedCategories','allowedFolders','subscriptionStatus','accessExpiry','lastLogin','createdAt'
+          ]));
+      allow update: if (owner() && uid != request.auth.uid
+          && resource.data.role != 'master_admin')
+        || (canManageAdmins() && uid != request.auth.uid
+          && resource.data.role != 'master_admin'
+          && request.resource.data.role in ['user','admin']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'role','predefinedRole','assignedRoleTitle','permissions','isSuspended'
+          ])
+          && request.resource.data.permissions is list
+          && (masterAdmin() || request.resource.data.permissions.hasOnly(profile().permissions))
+          && request.resource.data.permissions.hasOnly([
+            'dashboard.view','analytics.view','folders.create','folders.edit','folders.delete',
+            'videos.create','videos.edit','videos.delete','pdfs.create','pdfs.edit','pdfs.delete',
+            'students.manage','payments.verify','settings.manage','admins.manage','audit.view'
+          ]))
+        || (owner() && uid != request.auth.uid && resource.data.role == 'master_admin'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'role','predefinedRole','assignedRoleTitle','permissions','isSuspended','hasAllAccess','subscriptionStatus'
+          ]))
+        || ((canManageUsers() || canVerifyPayments()) && uid != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'hasAllAccess','allowedCategories','subscriptionStatus','accessExpiry'
+        ]))
+        || (self(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName','photoURL','phoneNumber','lastLogin'
+        ])
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role == resource.data.role)
+        || (owner() && self(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName','photoURL','phoneNumber','lastLogin','isPlatformOwner'
+        ])
+          && request.resource.data.role == resource.data.role);
+      allow delete: if owner() && uid != request.auth.uid;
     }
 
-    function isPlatformOwner() {
-      return isAuthenticated() && (
-        request.auth.token.email.lower() == 'editpeakstudio@gmail.com' ||
-        request.auth.token.email.lower() == 'janusahani1990@gmail.com'
-      );
+    match /categories/{id} {
+      allow read: if signedIn();
+      allow create: if permitted('folders.create') && validCategory(id);
+      allow update: if permitted('folders.edit') && validCategory(id);
+      allow delete: if permitted('folders.delete');
+    }
+    match /folders/{id} {
+      allow read: if signedIn();
+      allow create: if permitted('folders.create') && validFolder(id);
+      allow update: if permitted('folders.edit') && validFolder(id);
+      allow delete: if permitted('folders.delete');
+    }
+    match /videos/{id} {
+      allow read: if canReadVideo();
+      allow create: if permitted('videos.create') && validVideo(id);
+      allow update: if permitted('videos.edit') && validVideo(id);
+      allow delete: if permitted('videos.delete');
+    }
+    match /pdfs/{id} {
+      allow read: if canReadPdf();
+      allow create: if permitted('pdfs.create') && validPdf(id);
+      allow update: if permitted('pdfs.edit') && validPdf(id);
+      allow delete: if permitted('pdfs.delete');
     }
 
-    function isMasterAdmin() {
-      return isPlatformOwner() || (
-        isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master_admin' &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true
-      );
+    match /paymentRequests/{id} {
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.id == id
+        && request.resource.data.status == 'pending'
+        && request.resource.data.planType in ['all_access','category']
+        && (request.resource.data.planType != 'category' || request.resource.data.categoryId is string)
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.utr is string && request.resource.data.utr.size() > 0
+        && request.resource.data.proofUrl is string
+        && request.resource.data.proofUrl.size() <= 900000
+        && request.resource.data.userEmail == (request.auth.token.email == null ? '' : request.auth.token.email)
+        && request.resource.data.keys().hasOnly([
+          'id','uid','userEmail','userName','planType','categoryId','categoryName',
+          'amount','utr','proofUrl','status','submittedAt'
+        ]);
+      allow get, list: if signedIn() && (resource.data.uid == request.auth.uid || canVerifyPayments());
+      allow update: if canVerifyPayments() && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved','rejected']
+        && request.resource.data.resolvedBy == (request.auth.token.email == null ? '' : request.auth.token.email)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status','adminNote','resolvedAt','resolvedBy'
+        ]);
+      allow delete: if owner();
     }
-
-    function isAdmin() {
-      return isMasterAdmin() || (
-        isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true
-      );
+    match /payment_requests/{id} { allow read, write: if false; }
+    match /settings/{id} {
+      allow read: if signedIn();
+      allow create, update: if canManageSettings();
+      allow delete: if owner();
     }
-
-    // Users Collection
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      
-      // Prevent self-elevation to admin, master_admin, or granting permissions
-      allow create: if isOwner(userId) && 
-        request.resource.data.role == 'user' && 
-        request.resource.data.hasAllAccess == false &&
-        (request.resource.data.permissions == null || request.resource.data.permissions.size() == 0);
-
-      allow update: if isPlatformOwner() || (
-        isAdmin() && 
-        // Normal admins cannot modify the protected owner account
-        resource.data.email.lower() != 'editpeakstudio@gmail.com'
-      ) || (
-        isOwner(userId) &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.hasAllAccess == resource.data.hasAllAccess &&
-        request.resource.data.allowedCategories == resource.data.allowedCategories &&
-        request.resource.data.subscriptionStatus == resource.data.subscriptionStatus &&
-        request.resource.data.isSuspended == resource.data.isSuspended
-      );
-
-      allow delete: if isPlatformOwner();
+    match /sales_analytics/{id} {
+      allow read: if permitted('analytics.view');
+      allow create: if canVerifyPayments();
+      allow update, delete: if owner();
     }
-
-    // Dynamic Folders & Subfolders Collection
-    match /folders/{folderId} {
-      allow read: if true;
-      allow write: if isAdmin();
+    match /audit_logs/{id} {
+      allow read: if permitted('audit.view');
+      allow create: if activeAdmin()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.action is string
+        && request.resource.data.timestamp is string;
+      allow update, delete: if false;
     }
-
-    // Categories / Suites Collection
-    match /categories/{categoryId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    // Video Lessons Collection
-    match /videos/{videoId} {
-      allow read: if resource.data.isPublished == true || isAdmin();
-      allow write: if isAdmin();
-    }
-
-    // PDF Resources Collection
-    match /pdfs/{pdfId} {
-      allow read: if resource.data.isPublished == true || isAdmin();
-      allow write: if isAdmin();
-    }
-
-    // Security Audit Logs Collection (Immutable)
-    match /audit_logs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin() || isPlatformOwner();
-      allow update, delete: if false; // Audit logs can never be altered or deleted!
-    }
-
-    // Payment Proof Submissions
-    match /paymentRequests/{requestId} {
-      allow create: if isAuthenticated() &&
-        request.resource.data.uid == request.auth.uid &&
-        request.resource.data.status == 'pending';
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow update, delete: if isAdmin();
-    }
-
-    // Alias payment_requests for compatibility
-    match /payment_requests/{requestId} {
-      allow create: if isAuthenticated() &&
-        request.resource.data.uid == request.auth.uid &&
-        request.resource.data.status == 'pending';
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow update, delete: if isAdmin();
-    }
-
-    // Settings Collection
-    match /settings/{settingId} {
-      allow read: if true;
-      allow write: if isMasterAdmin() || isPlatformOwner();
-    }
-
-    // Sales Analytics Collection
-    match /sales_analytics/{saleId} {
-      allow read, write: if isAdmin();
-    }
+    match /{document=**} { allow read, write: if false; }
   }
 }

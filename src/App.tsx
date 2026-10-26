@@ -69,30 +69,54 @@ function AppContent() {
 
   // Subscribe to real-time Firebase / persistence data
   useEffect(() => {
-    const unsubAuth = subscribeToAuth((user) => setCurrentUser(user));
-    const unsubCats = subscribeToCategories((cats) => setCategories(cats));
-    const unsubFolders = subscribeToFolders((flds) => setFolders(flds));
-    const unsubVids = subscribeToVideos((vids) => setVideos(vids));
-    const unsubPdfs = subscribeToPdfs((p) => setPdfs(p));
-    const unsubUsers = subscribeToUsers((u) => setUsers(u));
-    const unsubPayments = subscribeToPaymentRequests((reqs) => setPaymentRequests(reqs));
-    const unsubSettings = subscribeToSettings((s) => setSettings(s));
-    const unsubSales = subscribeToSales((sl) => setSales(sl));
-    const unsubAudit = subscribeToAuditLogs((logs) => setAuditLogs(logs));
+    const unsubAuth = subscribeToAuth((user) => {
+      setCurrentUser(user);
+      setCurrentView(user?.role === 'admin' || user?.role === 'master_admin' ? 'admin' : 'home');
+    });
 
     return () => {
       unsubAuth();
+    };
+  }, []);
+
+  // Firebase-backed collections are subscribed only after Firebase Auth restores
+  // the real signed-in user; authorization is independently enforced by Firestore Rules.
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setCategories([]);
+      setFolders([]);
+      setVideos([]);
+      setPdfs([]);
+      setUsers([]);
+      setPaymentRequests([]);
+      setSales([]);
+      setAuditLogs([]);
+      setSettings(DEFAULT_SETTINGS);
+      return;
+    }
+
+    const unsubCats = subscribeToCategories((cats) => setCategories(cats));
+    const unsubFolders = subscribeToFolders((flds) => setFolders(flds));
+    const unsubSettings = subscribeToSettings((s) => setSettings(s));
+    const unsubSales = subscribeToSales((sl) => setSales(sl));
+    const unsubAudit = subscribeToAuditLogs((logs) => setAuditLogs(logs));
+    const unsubUsers = subscribeToUsers(setUsers);
+    const unsubPayments = subscribeToPaymentRequests(setPaymentRequests);
+    const canViewDrafts = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
+    const unsubVideos = subscribeToVideos(setVideos, canViewDrafts);
+    const unsubPdfs = subscribeToPdfs(setPdfs, canViewDrafts);
+    return () => {
       unsubCats();
       unsubFolders();
-      unsubVids();
-      unsubPdfs();
-      unsubUsers();
-      unsubPayments();
       unsubSettings();
       unsubSales();
       unsubAudit();
+      unsubUsers();
+      unsubPayments();
+      unsubVideos();
+      unsubPdfs();
     };
-  }, []);
+  }, [currentUser?.uid]);
 
   const handleOpenSubscribe = (cat?: Category) => {
     setSubscribeCategoryTarget(cat || null);

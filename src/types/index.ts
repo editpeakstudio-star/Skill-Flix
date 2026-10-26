@@ -64,6 +64,10 @@ export interface UserProfile {
   photoURL?: string;
   phoneNumber?: string;
   role: UserRole;
+  /** Set only when Firebase Auth confirms the designated owner email is verified. */
+  isPlatformOwner?: boolean;
+  /** UI notice that the owner email must be verified before owner access applies. */
+  ownerVerificationPending?: boolean;
   predefinedRole?: PredefinedRole;
   assignedRoleTitle?: string;
   permissions?: PermissionKey[];

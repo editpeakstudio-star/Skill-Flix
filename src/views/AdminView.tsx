@@ -64,7 +64,6 @@ import {
   SYSTEM_PERMISSIONS
 } from '../types';
 import { 
-  MASTER_ADMIN_EMAIL,
   isProtectedOwner,
   hasPermission,
   getPermissionsForRole,
@@ -2291,7 +2290,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       PERMANENT
                     </span>
                   </div>
-                  <span className="text-[11px] text-zinc-400 font-mono">{MASTER_ADMIN_EMAIL}</span>
+                  <span className="text-[11px] text-zinc-400 font-mono">Authorized by verified Firebase owner email</span>
                 </div>
               </div>
               <span className="text-[11px] text-amber-300 font-semibold hidden sm:inline">

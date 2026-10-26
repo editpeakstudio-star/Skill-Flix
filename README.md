@@ -21,7 +21,7 @@ The system includes a responsive student-facing portal, video player, curated PD
   - Real-time submission tracking (`Pending Review`, `Approved`, `Rejected` with admin reason).
   - Direct WhatsApp / Telegram support channel.
 
-### 🛡️ 2. Admin Console (`editpeakstudio@gmail.com`)
+### 🛡️ 2. Admin Console (authorized Firebase accounts)
 - **Financial Sales Analytics**: Real-time sales ledger tracking gross revenue, active subscribers, and verified transactions.
 - **Video & Lesson Management**: Upload, edit, delete, and toggle publication status (`Published` / `Draft`).
 - **PDF & Material Management**: Upload, update, and manage document downloads.
@@ -68,39 +68,23 @@ npm run build
 ## 🔐 Firebase Configuration & Console Setup
 
 ### Target Project Details
-- **Project ID**: `skill-flix-98ebc`
-- **Owner / Master Admin Email**: `editpeakstudio@gmail.com`
+- **Project ID**: `skillflix-academy`
 
 ### Manual Firebase Console Setup Checklist
 1. **Firebase Authentication**:
    - Navigate to [Firebase Console](https://console.firebase.google.com/) -> Build -> Authentication.
-   - Enable the **Email/Password** sign-in provider under the "Sign-in method" tab.
-   - (Optional) Enable **Google Sign-In** provider if desired.
+   - Enable **Email/Password**, **Google**, and **Phone** under **Sign-in method**.
+   - Under **Settings → Authorized domains**, add `127.0.0.1` and `localhost` (hostnames only; no scheme or port).
 2. **Cloud Firestore**:
-   - Navigate to Build -> Firestore Database -> Create Database.
-   - Select your preferred cloud region (e.g. `asia-south1` or `us-central1`).
-   - Copy the contents of `firestore.rules` into the "Rules" tab in Firestore Console and click **Publish**.
-3. **Admin Account Appointment**:
-   - Register or sign in with `editpeakstudio@gmail.com`.
-   - The platform automatically assigns `master_admin` privileges and universal access to this address.
+   - In project `skillflix-academy`, check that the existing Firestore database and data are present. The app uses the default database and its existing collections; do not create replacement collections.
+   - Review the current project rules against `firestore.rules` before publishing any changes so existing policies are not accidentally overwritten.
+3. **Admin Account Setup**:
+   - Register or sign in with the intended Firebase Authentication account.
+   - Admin roles are assigned through authorized admin management. The protected owner identity is `editpeakstudio@gmail.com` only when Firebase Auth marks that exact email as verified; Firestore Rules enforce that signed token condition. See `docs/FIREBASE_AUTH_SETUP.md`.
 
 ---
 
-## 🧪 Testing Guide
+## Testing Guide
 
-1. **Testing Student Experience**:
-   - Open the app. Click **Sign In** -> select **Demo Student** (`factinfinity12@gmail.com`).
-   - Browse the homepage and click on any category collection.
-   - Click **Get All-Access** to open the checkout modal.
-   - Select a sample screenshot file, enter a sample UTR (e.g. `429618039218`), and click **Upload Proof**.
-2. **Testing Admin Verification & ON/OFF Toggles**:
-   - Open profile or navbar -> click **Switch to Master Admin** (`editpeakstudio@gmail.com`).
-   - Open **Admin Console** from the top bar.
-   - Navigate to **Payment Requests**: Click **Inspect Screenshot** on the student's submission -> click **Approve & Unlock**.
-   - Navigate to **Users (Authority & Subscription)**:
-     - Notice the student's status is now active!
-     - Test the individual category toggles (`TURN ON` / `TURN OFF`) — updates are instant with zero hanging spinners.
-     - Test `Turn ON All` and `Turn OFF All`.
-   - Navigate to **Videos (Upload & Manage)**:
-     - Click the `Published / Draft` pill — notice the instantaneous toggle and persisted status.
+Use a real Firebase Authentication student account to verify the student experience and payment flow. Verify admin actions with an account explicitly authorized as an admin in Firestore. Platform-owner actions require signing in as the verified `editpeakstudio@gmail.com` account. The website does not provide demo sign-in or account-switching shortcuts.
      - Click **Add New Video Lesson** to upload a new lesson.

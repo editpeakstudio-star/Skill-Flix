@@ -4,8 +4,6 @@ import {
   Lock, 
   Mail, 
   User as UserIcon, 
-  Crown, 
-  Shield, 
   ArrowRight,
   Phone,
   Smartphone,
@@ -22,7 +20,6 @@ import {
   sendPhoneOtp, 
   verifyPhoneOtp, 
   sendPasswordReset, 
-  switchSession 
 } from '../services/firebase';
 import { useToast } from './Toast';
 
@@ -72,6 +69,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       setOtpCode('');
       setPhoneNumber('');
       setIsForgotPassword(false);
+    } else if (typeof window !== 'undefined' && (window as any).recaptchaVerifier) {
+      try { (window as any).recaptchaVerifier.clear(); } catch { /* verifier may already be cleared */ }
+      delete (window as any).recaptchaVerifier;
     }
   }, [isOpen]);
 
@@ -79,11 +79,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
   // 1. Google Auth Handler
   const handleGoogleLogin = async () => {
+    if (loading) return;
     try {
       setLoading(true);
       setErrorMessage(null);
       const user = await loginWithGoogle();
-      showToast(`Welcome to Skill-Flix, ${user.displayName || user.email}!`, 'success');
+      showToast(user.ownerVerificationPending
+        ? 'Owner access requires verified email. Check for a Firebase verification link; if none arrives, send one from Firebase Console → Authentication → Users, then sign out and sign in again.'
+        : `Welcome to Skill-Flix, ${user.displayName || user.email}!`, user.ownerVerificationPending ? 'info' : 'success');
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -97,6 +100,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   // 2. Phone OTP: Send OTP
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setErrorMessage(null);
 
     const cleanDigits = phoneNumber.trim().replace(/[^0-9]/g, '');
@@ -129,6 +133,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   // 2. Phone OTP: Verify OTP
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setErrorMessage(null);
 
     if (!confirmationResult) {
@@ -158,6 +163,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   // 3. Email & Password: Login / Register / Forgot
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setErrorMessage(null);
 
     if (!email || !email.includes('@')) {
@@ -187,11 +193,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     try {
       setLoading(true);
       if (isRegister) {
-        await registerUser(email, password, name);
-        showToast(`Account created! Welcome to Skill-Flix, ${name || email}!`, 'success');
+        const user = await registerUser(email, password, name);
+        showToast(user.ownerVerificationPending
+          ? 'Account created. Owner access requires verified email. Check for a Firebase verification link; if none arrives, send one from Firebase Console → Authentication → Users, then sign out and sign in again.'
+          : `Account created! Welcome to Skill-Flix, ${name || email}!`, user.ownerVerificationPending ? 'info' : 'success');
       } else {
-        await loginUser(email, password);
-        showToast('Signed in successfully!', 'success');
+        const user = await loginUser(email, password);
+        showToast(user.ownerVerificationPending
+          ? 'Owner access requires verified email. Check for a Firebase verification link; if none arrives, send one from Firebase Console → Authentication → Users, then sign out and sign in again.'
+          : 'Signed in successfully!', user.ownerVerificationPending ? 'info' : 'success');
       }
       onSuccess();
       onClose();
@@ -199,18 +209,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       setErrorMessage(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // 1-Click Session Switcher for Testing
-  const handleQuickSwitch = (role: 'master_admin' | 'student') => {
-    try {
-      const user = switchSession(role);
-      showToast(`Switched active session to ${user.displayName} (${user.role})`, 'success');
-      onSuccess();
-      onClose();
-    } catch (e: any) {
-      showToast(e.message || 'Failed to switch session', 'error');
     }
   };
 
@@ -247,36 +245,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           </p>
         </div>
 
-        {/* Quick Testing Switcher */}
-        <div className="mb-4 p-2.5 rounded-xl bg-[#05070D] border border-white/[0.08]">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 text-center">
-            ⚡ Quick 1-Click Testing Access
-          </span>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickSwitch('master_admin')}
-              className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold transition-all cursor-pointer"
-            >
-              <Crown className="w-3.5 h-3.5 text-amber-400" />
-              <span>Master Owner</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickSwitch('student')}
-              className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 text-xs font-semibold transition-all cursor-pointer"
-            >
-              <UserIcon className="w-3.5 h-3.5 text-blue-400" />
-              <span>Demo Student</span>
-            </button>
-          </div>
-        </div>
-
         {/* 3 Login Options Switcher Tabs */}
         {!isForgotPassword && (
           <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#05070D] border border-white/[0.08] mb-4">
             <button
               type="button"
+              disabled={loading}
               onClick={() => { setAuthMethod('google'); setErrorMessage(null); }}
               className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 authMethod === 'google'
@@ -295,6 +269,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
             <button
               type="button"
+              disabled={loading}
               onClick={() => {
                 setAuthMethod('phone');
                 setErrorMessage(null);
@@ -314,6 +289,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
             <button
               type="button"
+              disabled={loading}
               onClick={() => { setAuthMethod('email'); setErrorMessage(null); }}
               className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 authMethod === 'email'

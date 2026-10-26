@@ -14,7 +14,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { UserProfile, Category, VideoLesson, PaymentRequest } from '../types';
-import { logoutUser, switchSession, getWatchProgress } from '../services/firebase';
+import { logoutUser, getWatchProgress } from '../services/firebase';
 import { useToast } from '../components/Toast';
 
 interface ProfileViewProps {
@@ -45,15 +45,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       showToast('Logged out successfully', 'info');
     } catch (e: any) {
       showToast(e.message || 'Logout failed', 'error');
-    }
-  };
-
-  const handleSwitch = (role: 'master_admin' | 'student') => {
-    try {
-      const u = switchSession(role);
-      showToast(`Switched active session to ${u.displayName}`, 'success');
-    } catch (e: any) {
-      showToast(e.message || 'Switch failed', 'error');
     }
   };
 
@@ -273,27 +264,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             No payments submitted yet.
           </p>
         )}
-      </div>
-
-      {/* Quick Role Switcher for QA / Verification */}
-      <div className="p-4 rounded-2xl bg-[#060912] border border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
-        <span>Developer / Reviewer Mode Switch:</span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleSwitch('master_admin')}
-            className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30"
-          >
-            Switch to Master Admin
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSwitch('student')}
-            className="px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 font-semibold border border-blue-500/30"
-          >
-            Switch to Student
-          </button>
-        </div>
       </div>
 
     </div>

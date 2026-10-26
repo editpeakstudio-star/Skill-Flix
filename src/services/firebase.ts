@@ -5,25 +5,32 @@ import {
   signInWithEmailAndPassword as fbSignInWithEmail,
   createUserWithEmailAndPassword as fbCreateUserWithEmail,
   sendPasswordResetEmail as fbSendPasswordResetEmail,
+  sendEmailVerification as fbSendEmailVerification,
   signOut as fbSignOut,
+  setPersistence,
+  browserLocalPersistence,
   GoogleAuthProvider,
   signInWithPopup,
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
+  updateProfile,
   User as FirebaseUser 
 } from 'firebase/auth';
 import {
   getFirestore,
   collection,
   doc,
+  getDoc,
   setDoc,
   getDocs,
   updateDoc,
   deleteDoc,
+  writeBatch,
   onSnapshot,
   query,
-  orderBy
+  orderBy,
+  where
 } from 'firebase/firestore';
 import { 
   UserProfile, 
@@ -41,18 +48,18 @@ import {
   SYSTEM_PERMISSIONS
 } from '../types';
 
-export const MASTER_ADMIN_EMAIL = 'editpeakstudio@gmail.com';
-export const CO_OWNER_EMAIL = 'janusahani1990@gmail.com'; // AI Studio project owner
 export const DEFAULT_UPI_ID = 'rg570251-1@oksbi';
+const PLATFORM_OWNER_EMAIL = 'editpeakstudio@gmail.com';
 
-// Firebase configuration for skill-flix-98ebc
+// Firebase web app configuration for skillflix-academy.
 const firebaseConfig = {
-  apiKey: "AIzaSyD0MvGXOnfFIQJkkidBvkRiNo93t6BUTw8",
-  authDomain: "skill-flix-98ebc.firebaseapp.com",
-  projectId: "skill-flix-98ebc",
-  storageBucket: "skill-flix-98ebc.appspot.com",
-  messagingSenderId: "548789001732",
-  appId: "1:548789001732:web:7d70efa5665381663d9f51"
+  apiKey: "AIzaSyDAjxOH7BdugjWlVm-uD8fWgAXiCGts-Mk",
+  authDomain: "skillflix-academy.firebaseapp.com",
+  projectId: "skillflix-academy",
+  storageBucket: "skillflix-academy.firebasestorage.app",
+  messagingSenderId: "466096351734",
+  appId: "1:466096351734:web:f86d0146f302e19dde7fd7",
+  measurementId: "G-J64YDWND5C"
 };
 
 let app: any = null;
@@ -61,8 +68,13 @@ let db: any = null;
 let isFirebaseOnline = false;
 
 try {
-  app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  app = getApps().some(existingApp => existingApp.name === '[DEFAULT]')
+    ? getApp()
+    : initializeApp(firebaseConfig);
   auth = getAuth(app);
+  void setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('Firebase Auth persistence could not be configured:', err);
+  });
   db = getFirestore(app);
   isFirebaseOnline = true;
 } catch (err) {
@@ -210,13 +222,15 @@ class EventBus {
 
 const eventBus = new EventBus();
 
-// Helper to check if a user is the protected owner
+// UI/service helper only. Firestore Rules independently verify the signed Auth token.
 export function isProtectedOwner(emailOrUser?: string | UserProfile | null): boolean {
-  if (!emailOrUser) return false;
-  const email = typeof emailOrUser === 'string' ? emailOrUser : emailOrUser.email;
-  if (!email) return false;
-  const clean = email.toLowerCase().trim();
-  return clean === MASTER_ADMIN_EMAIL.toLowerCase() || clean === CO_OWNER_EMAIL.toLowerCase();
+  return !!emailOrUser && typeof emailOrUser !== 'string' && emailOrUser.isPlatformOwner === true;
+}
+
+function isCurrentAuthUserPlatformOwner(): boolean {
+  const current = auth?.currentUser as FirebaseUser | null;
+  return !!current && current.emailVerified === true &&
+    current.email?.trim().toLowerCase() === PLATFORM_OWNER_EMAIL;
 }
 
 // Get full permissions for a given predefined role
@@ -288,35 +302,56 @@ export function hasPermission(user: UserProfile | null, permission: PermissionKe
   return false;
 }
 
-// Ensure master admin exists in local users pool
-function ensureMasterAdminInStorage() {
-  const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-  const masterId = 'admin_editpeakstudio';
-  if (!users[masterId]) {
-    users[masterId] = {
-      uid: masterId,
-      email: MASTER_ADMIN_EMAIL,
-      displayName: 'Master Owner',
-      role: 'master_admin',
-      predefinedRole: 'owner',
-      assignedRoleTitle: 'Platform Owner',
-      permissions: SYSTEM_PERMISSIONS.map(p => p.key),
-      isSuspended: false,
-      hasAllAccess: true,
-      allowedCategories: [],
-      subscriptionStatus: 'active',
-      accessExpiry: '2036-12-31T23:59:59Z',
-      lastLogin: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    };
-    writeStorage(STORAGE_KEYS.USERS, users);
-  }
-}
-ensureMasterAdminInStorage();
-
 // ==========================================
 // AUTHENTICATION SERVICES
 // ==========================================
+
+async function loadAuthenticatedProfile(fbUser: FirebaseUser): Promise<UserProfile> {
+  if (!db) throw new Error('Firebase Firestore is unavailable. Check the Firebase project configuration.');
+  const isOwner = fbUser.emailVerified === true &&
+    fbUser.email?.trim().toLowerCase() === PLATFORM_OWNER_EMAIL;
+  const profileRef = doc(db, 'users', fbUser.uid);
+  const remote = await getDoc(profileRef);
+  const data = remote.exists() ? remote.data() : {};
+  const role: UserRole = isOwner ? 'master_admin' : (data.role === 'admin' || data.role === 'master_admin' ? data.role : 'user');
+  const profile: UserProfile = {
+    uid: fbUser.uid,
+    email: fbUser.email || '',
+    displayName: data.displayName || fbUser.displayName || fbUser.phoneNumber || fbUser.email?.split('@')[0] || 'Student',
+    photoURL: fbUser.photoURL || data.photoURL || undefined,
+    phoneNumber: fbUser.phoneNumber || data.phoneNumber || undefined,
+    role,
+    isPlatformOwner: isOwner,
+    predefinedRole: isOwner ? 'owner' : data.predefinedRole,
+    assignedRoleTitle: isOwner ? 'Platform Owner' : data.assignedRoleTitle,
+    permissions: isOwner ? SYSTEM_PERMISSIONS.map(p => p.key) : Array.isArray(data.permissions) ? data.permissions : [],
+    isSuspended: isOwner ? false : data.isSuspended === true,
+    hasAllAccess: isOwner || data.hasAllAccess === true,
+    allowedCategories: Array.isArray(data.allowedCategories) ? data.allowedCategories : [],
+    allowedFolders: Array.isArray(data.allowedFolders) ? data.allowedFolders : [],
+    subscriptionStatus: isOwner ? 'active' : data.subscriptionStatus || 'none',
+    accessExpiry: data.accessExpiry,
+    lastLogin: new Date().toISOString(),
+    createdAt: data.createdAt || new Date().toISOString()
+  };
+
+  if (!remote.exists()) {
+    const { uid: _uid, ...newDoc } = profile;
+    await setDoc(profileRef, Object.fromEntries(Object.entries(newDoc).filter(([, value]) => value !== undefined)));
+  } else if (data.displayName !== profile.displayName || data.photoURL !== profile.photoURL || (isOwner && data.isPlatformOwner !== true)) {
+    await setDoc(profileRef, {
+      ...(data.displayName !== profile.displayName ? { displayName: profile.displayName } : {}),
+      ...(data.photoURL !== profile.photoURL ? { photoURL: profile.photoURL || null } : {}),
+      ...(isOwner ? { isPlatformOwner: true } : {})
+    }, { merge: true });
+  }
+
+  const cached = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
+  cached[fbUser.uid] = profile;
+  writeStorage(STORAGE_KEYS.USERS, cached);
+  writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
+  return profile;
+}
 
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
   const saved = readStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
@@ -324,9 +359,7 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
 }
 
 export function subscribeToAuth(callback: (user: UserProfile | null) => void): () => void {
-  // Fire current saved state immediately
-  const initial = readStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
-  callback(initial);
+  callback(null);
 
   const unsubStorage = eventBus.subscribe<UserProfile | null>('auth', (user) => {
     callback(user);
@@ -338,47 +371,26 @@ export function subscribeToAuth(callback: (user: UserProfile | null) => void): (
     try {
       unsubFb = fbOnAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
         if (fbUser) {
-          const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-          let profile = users[fbUser.uid];
-          const isMaster = isProtectedOwner(fbUser.email);
-          
-          if (!profile) {
-            profile = {
-              uid: fbUser.uid,
-              email: fbUser.email || '',
-              displayName: fbUser.displayName || fbUser.phoneNumber || (fbUser.email ? fbUser.email.split('@')[0] : 'Student'),
-              photoURL: fbUser.photoURL || undefined,
-              phoneNumber: fbUser.phoneNumber || undefined,
-              role: isMaster ? 'master_admin' : 'user',
-              predefinedRole: isMaster ? 'owner' : undefined,
-              assignedRoleTitle: isMaster ? 'Platform Owner' : undefined,
-              permissions: isMaster ? SYSTEM_PERMISSIONS.map(p => p.key) : [],
-              isSuspended: false,
-              hasAllAccess: isMaster,
-              allowedCategories: [],
-              subscriptionStatus: isMaster ? 'active' : 'none',
-              createdAt: new Date().toISOString()
-            };
-            users[fbUser.uid] = profile;
-            writeStorage(STORAGE_KEYS.USERS, users);
-          } else {
-            // Keep protected owner role intact
-            if (isMaster) {
-              profile.role = 'master_admin';
-              profile.predefinedRole = 'owner';
-              profile.permissions = SYSTEM_PERMISSIONS.map(p => p.key);
-              profile.hasAllAccess = true;
+          try {
+            // A verified owner can return to an existing persisted session after
+            // clicking the verification link. Refresh the Firebase user and its
+            // signed token before deriving any client-side role from emailVerified.
+            // Firestore Rules still independently authorize privileged requests.
+            try {
+              await fbUser.reload();
+              await fbUser.getIdToken(true);
+            } catch (refreshError) {
+              console.warn('Could not refresh the Firebase Auth session:', refreshError);
             }
-          }
-          writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
-          callback(profile);
-        } else {
-          // If no fbUser and current user wasn't a local demo session, trigger null
-          const current = readStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
-          if (current && !current.uid.startsWith('demo_') && !current.uid.startsWith('admin_')) {
-            writeStorage(STORAGE_KEYS.CURRENT_USER, null);
+            const profile = await loadAuthenticatedProfile(fbUser);
+            callback(profile);
+          } catch (err) {
+            console.error('Could not load the signed-in profile:', err);
             callback(null);
           }
+        } else {
+          writeStorage(STORAGE_KEYS.CURRENT_USER, null);
+          callback(null);
         }
       });
     } catch (e) {
@@ -394,74 +406,30 @@ export function subscribeToAuth(callback: (user: UserProfile | null) => void): (
 
 // 1. LOGIN WITH GOOGLE (Continue with Google)
 export async function loginWithGoogle(): Promise<UserProfile> {
-  if (auth) {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
-      const fbUser = result.user;
-
-      const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-      let profile = users[fbUser.uid];
-      const isMaster = isProtectedOwner(fbUser.email);
-
-      if (!profile) {
-        profile = {
-          uid: fbUser.uid,
-          email: fbUser.email || '',
-          displayName: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Google User'),
-          photoURL: fbUser.photoURL || undefined,
-          role: isMaster ? 'master_admin' : 'user',
-          predefinedRole: isMaster ? 'owner' : undefined,
-          assignedRoleTitle: isMaster ? 'Platform Owner' : undefined,
-          permissions: isMaster ? SYSTEM_PERMISSIONS.map(p => p.key) : [],
-          isSuspended: false,
-          hasAllAccess: isMaster,
-          allowedCategories: [],
-          subscriptionStatus: isMaster ? 'active' : 'none',
-          lastLogin: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        };
-      } else {
-        profile.lastLogin = new Date().toISOString();
-        if (fbUser.photoURL) profile.photoURL = fbUser.photoURL;
-        if (isMaster) {
-          profile.role = 'master_admin';
-          profile.predefinedRole = 'owner';
-          profile.permissions = SYSTEM_PERMISSIONS.map(p => p.key);
-          profile.hasAllAccess = true;
-        }
+  if (!auth) throw new Error('Firebase Authentication is unavailable. Check the Firebase configuration and network connection.');
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await signInWithPopup(auth, provider);
+    const profile = await loadAuthenticatedProfile(result.user);
+    if (result.user.email?.trim().toLowerCase() === PLATFORM_OWNER_EMAIL && !result.user.emailVerified) {
+      try {
+        await fbSendEmailVerification(result.user);
+        profile.ownerVerificationPending = true;
+        writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
+      } catch (verificationError) {
+        console.warn('Could not send owner email verification:', verificationError);
+        profile.ownerVerificationPending = true;
       }
-
-      users[fbUser.uid] = profile;
-      writeStorage(STORAGE_KEYS.USERS, users);
-      writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
-      eventBus.emit('auth', profile);
-      eventBus.emit('users', Object.values(users));
-
-      // Record audit log
-      recordAuditLog({
-        actorUid: profile.uid,
-        actorEmail: profile.email,
-        actorRole: profile.role,
-        action: 'auth.google_login',
-        details: `Logged in via Google Authentication (${profile.email})`
-      });
-
-      return profile;
-    } catch (err: any) {
-      console.warn('Google sign in popup error:', err.message);
-      if (err.code === 'auth/popup-closed-by-user') {
-        throw new Error('Google sign-in popup was closed before completion.');
-      }
-      if (err.code === 'auth/cancelled-popup-request') {
-        throw new Error('Google sign-in request was cancelled.');
-      }
-      throw new Error(err.message || 'Failed to authenticate with Google.');
     }
+    eventBus.emit('auth', profile);
+    return profile;
+  } catch (err: any) {
+    if (err.code === 'auth/popup-closed-by-user') throw new Error('Google sign-in was closed before completion.');
+    if (err.code === 'auth/cancelled-popup-request') throw new Error('A Google sign-in request is already open.');
+    if (err.code === 'auth/unauthorized-domain') throw new Error('This site domain is not authorized in Firebase. Add 127.0.0.1 under Authentication → Settings → Authorized domains.');
+    throw firebaseAuthMessage(err, 'Google sign-in failed.');
   }
-
-  throw new Error('Firebase Authentication is not available. Please check network connection.');
 }
 
 // 2. PHONE NUMBER AUTHENTICATION WITH OTP
@@ -504,329 +472,133 @@ export async function sendPhoneOtp(phoneNumber: string, appVerifier: any): Promi
     const confirmationResult = await signInWithPhoneNumber(auth, formatted, appVerifier);
     return confirmationResult;
   } catch (err: any) {
-    console.error('Phone sign in error:', err);
-    if (err.code === 'auth/invalid-phone-number') {
-      throw new Error('Invalid phone number format. Please provide a valid mobile number with country code (e.g. +91 XXXXXXXXXX).');
-    }
-    if (err.code === 'auth/too-many-requests') {
-      throw new Error('Too many requests. Please wait a few minutes before trying again.');
-    }
-    throw new Error(err.message || 'Failed to send OTP verification code.');
+    throw firebaseAuthMessage(err, 'Could not send the verification code.');
   }
 }
 
 export async function verifyPhoneOtp(confirmationResult: ConfirmationResult, code: string): Promise<UserProfile> {
   try {
     const credential = await confirmationResult.confirm(code);
-    const fbUser = credential.user;
-
-    const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-    let profile = users[fbUser.uid];
-
-    if (!profile) {
-      profile = {
-        uid: fbUser.uid,
-        email: fbUser.email || `${fbUser.phoneNumber?.replace(/[^0-9]/g, '')}@phone.skillflix.io`,
-        displayName: fbUser.phoneNumber || 'Mobile Student',
-        phoneNumber: fbUser.phoneNumber || undefined,
-        role: 'user',
-        permissions: [],
-        isSuspended: false,
-        hasAllAccess: false,
-        allowedCategories: [],
-        subscriptionStatus: 'none',
-        lastLogin: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      };
-    } else {
-      profile.lastLogin = new Date().toISOString();
-      if (fbUser.phoneNumber) profile.phoneNumber = fbUser.phoneNumber;
-    }
-
-    users[fbUser.uid] = profile;
-    writeStorage(STORAGE_KEYS.USERS, users);
-    writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
+    const profile = await loadAuthenticatedProfile(credential.user);
     eventBus.emit('auth', profile);
-    eventBus.emit('users', Object.values(users));
-
-    recordAuditLog({
-      actorUid: profile.uid,
-      actorEmail: profile.email,
-      actorRole: profile.role,
-      action: 'auth.phone_login',
-      details: `Logged in via Phone OTP (${profile.phoneNumber})`
-    });
-
     return profile;
   } catch (err: any) {
-    console.error('Verify OTP error:', err);
-    if (err.code === 'auth/invalid-verification-code') {
-      throw new Error('Invalid OTP code. Please enter the correct 6-digit verification code.');
-    }
-    if (err.code === 'auth/code-expired') {
-      throw new Error('The OTP code has expired. Please request a new code.');
-    }
-    throw new Error(err.message || 'Failed to verify OTP code.');
+    if (err.code === 'auth/invalid-verification-code') throw new Error('That verification code is incorrect. Check it and try again.');
+    if (err.code === 'auth/code-expired') throw new Error('That verification code expired. Request a new code.');
+    throw firebaseAuthMessage(err, 'Phone verification failed.');
   }
 }
 
-// 3. EMAIL & PASSWORD LOGIN & REGISTRATION
+function firebaseAuthMessage(err: any, fallback: string): Error {
+  const code = String(err?.code || '');
+  if (code === 'auth/unauthorized-domain') return new Error('This site domain is not authorized in Firebase. Add 127.0.0.1 under Authentication → Settings → Authorized domains.');
+  if (code === 'auth/operation-not-allowed') return new Error('This sign-in method is disabled. Enable it in Firebase Console → Authentication → Sign-in method.');
+  if (code === 'auth/network-request-failed') return new Error('Network connection failed. Check your internet connection and try again.');
+  if (code === 'auth/too-many-requests') return new Error('Too many attempts. Wait a few minutes and try again.');
+  if (code === 'auth/invalid-email') return new Error('Enter a valid email address.');
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') return new Error('Email or password is incorrect.');
+  if (code === 'auth/email-already-in-use') return new Error('An account already exists with this email. Sign in instead.');
+  if (code === 'auth/weak-password') return new Error('Choose a stronger password with at least 6 characters.');
+  if (code === 'auth/missing-phone-number' || code === 'auth/invalid-phone-number') return new Error('Enter a valid phone number with its country code.');
+  if (code === 'auth/captcha-check-failed') return new Error('Phone verification could not validate this device. Refresh the page and request a new code.');
+  if (code === 'permission-denied' || code === 'firestore/permission-denied') return new Error('Sign-in worked, but Firestore denied profile access. Check the deployed Firestore security rules.');
+  return new Error(err?.message || fallback);
+}
+
+async function persistAdminDocument(collectionName: string, id: string, data: Record<string, any>, merge = true): Promise<void> {
+  if (!db || !auth?.currentUser) throw new Error('Sign in as an authorized administrator with an active Firebase connection to save changes.');
+  try {
+    await setDoc(doc(db, collectionName, id), data, { merge });
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Firebase rejected this change. No local success was recorded.');
+  }
+}
+
+async function updateAdminDocument(collectionName: string, id: string, data: Record<string, any>): Promise<void> {
+  if (!db || !auth?.currentUser) throw new Error('Sign in as an authorized administrator with an active Firebase connection to save changes.');
+  try {
+    await updateDoc(doc(db, collectionName, id), data);
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Firebase rejected this change. No local success was recorded.');
+  }
+}
+
+async function deleteAdminDocument(collectionName: string, id: string): Promise<void> {
+  if (!db || !auth?.currentUser) throw new Error('Sign in as an authorized administrator with an active Firebase connection to delete content.');
+  try {
+    await deleteDoc(doc(db, collectionName, id));
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Firebase rejected this deletion. No local success was recorded.');
+  }
+}
+
 export async function loginUser(email: string, pass: string): Promise<UserProfile> {
-  const cleanEmail = email.trim().toLowerCase();
-  
-  if (auth && pass.length >= 6) {
-    try {
-      const cred = await fbSignInWithEmail(auth, cleanEmail, pass);
-      const isMaster = isProtectedOwner(cleanEmail);
-      
-      const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-      let profile = users[cred.user.uid];
-
-      if (!profile) {
-        profile = {
-          uid: cred.user.uid,
-          email: cleanEmail,
-          displayName: cred.user.displayName || cleanEmail.split('@')[0],
-          role: isMaster ? 'master_admin' : 'user',
-          predefinedRole: isMaster ? 'owner' : undefined,
-          assignedRoleTitle: isMaster ? 'Platform Owner' : undefined,
-          permissions: isMaster ? SYSTEM_PERMISSIONS.map(p => p.key) : [],
-          isSuspended: false,
-          hasAllAccess: isMaster,
-          allowedCategories: [],
-          subscriptionStatus: isMaster ? 'active' : 'none',
-          lastLogin: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        };
-      } else {
-        profile.lastLogin = new Date().toISOString();
-        if (isMaster) {
-          profile.role = 'master_admin';
-          profile.predefinedRole = 'owner';
-          profile.permissions = SYSTEM_PERMISSIONS.map(p => p.key);
-          profile.hasAllAccess = true;
-        }
+  if (!auth) throw new Error('Firebase Authentication is unavailable. Check the Firebase configuration and network connection.');
+  if (!email.trim() || !email.includes('@')) throw new Error('Enter a valid email address.');
+  if (!pass || pass.length < 6) throw new Error('Password must be at least 6 characters long.');
+  try {
+    const credential = await fbSignInWithEmail(auth, email.trim().toLowerCase(), pass);
+    const profile = await loadAuthenticatedProfile(credential.user);
+    if (credential.user.email?.trim().toLowerCase() === PLATFORM_OWNER_EMAIL && !credential.user.emailVerified) {
+      try {
+        await fbSendEmailVerification(credential.user);
+        profile.ownerVerificationPending = true;
+        writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
+      } catch (verificationError) {
+        console.warn('Could not send owner email verification:', verificationError);
+        profile.ownerVerificationPending = true;
       }
-
-      users[cred.user.uid] = profile;
-      writeStorage(STORAGE_KEYS.USERS, users);
-      writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
-      eventBus.emit('auth', profile);
-      eventBus.emit('users', Object.values(users));
-      return profile;
-    } catch (fbErr: any) {
-      if (fbErr.code === 'auth/wrong-password' || fbErr.code === 'auth/invalid-credential') {
-        throw new Error('Invalid email or password. Please verify and try again.');
-      }
-      if (fbErr.code === 'auth/user-not-found') {
-        throw new Error('No account found with this email. Please register first.');
-      }
-      console.warn('Firebase signIn note, falling back to local credentials check:', fbErr.message);
     }
+    eventBus.emit('auth', profile);
+    return profile;
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Could not sign in. Check your details and try again.');
   }
-
-  // Fallback verification for demo / offline accounts
-  const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-  const found = Object.values(users).find(u => u.email.toLowerCase() === cleanEmail);
-
-  if (found) {
-    if (found.isSuspended) {
-      throw new Error('This account has been suspended by the platform administrator.');
-    }
-    found.lastLogin = new Date().toISOString();
-    users[found.uid] = found;
-    writeStorage(STORAGE_KEYS.USERS, users);
-    writeStorage(STORAGE_KEYS.CURRENT_USER, found);
-    eventBus.emit('auth', found);
-    eventBus.emit('users', Object.values(users));
-    return found;
-  }
-
-  // Never grant admin on a new unauthenticated email entered in a form!
-  const isMaster = isProtectedOwner(cleanEmail);
-  const uid = isMaster ? 'admin_editpeakstudio' : `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const newProfile: UserProfile = {
-    uid,
-    email: cleanEmail,
-    displayName: cleanEmail.split('@')[0],
-    role: isMaster ? 'master_admin' : 'user',
-    predefinedRole: isMaster ? 'owner' : undefined,
-    assignedRoleTitle: isMaster ? 'Platform Owner' : undefined,
-    permissions: isMaster ? SYSTEM_PERMISSIONS.map(p => p.key) : [],
-    isSuspended: false,
-    hasAllAccess: isMaster,
-    allowedCategories: [],
-    subscriptionStatus: isMaster ? 'active' : 'none',
-    lastLogin: new Date().toISOString(),
-    createdAt: new Date().toISOString()
-  };
-
-  users[uid] = newProfile;
-  writeStorage(STORAGE_KEYS.USERS, users);
-  writeStorage(STORAGE_KEYS.CURRENT_USER, newProfile);
-  eventBus.emit('auth', newProfile);
-  eventBus.emit('users', Object.values(users));
-  return newProfile;
 }
 
 export async function registerUser(email: string, pass: string, name: string): Promise<UserProfile> {
   const cleanEmail = email.trim().toLowerCase();
-  const cleanName = name.trim() || cleanEmail.split('@')[0];
-
-  if (auth && pass.length >= 6) {
-    try {
-      const cred = await fbCreateUserWithEmail(auth, cleanEmail, pass);
-      const isMaster = isProtectedOwner(cleanEmail);
-      const profile: UserProfile = {
-        uid: cred.user.uid,
-        email: cleanEmail,
-        displayName: cleanName,
-        role: isMaster ? 'master_admin' : 'user',
-        predefinedRole: isMaster ? 'owner' : undefined,
-        assignedRoleTitle: isMaster ? 'Platform Owner' : undefined,
-        permissions: isMaster ? SYSTEM_PERMISSIONS.map(p => p.key) : [],
-        isSuspended: false,
-        hasAllAccess: isMaster,
-        allowedCategories: [],
-        subscriptionStatus: isMaster ? 'active' : 'none',
-        lastLogin: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      };
-      const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-      users[cred.user.uid] = profile;
-      writeStorage(STORAGE_KEYS.USERS, users);
-      writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
-      eventBus.emit('auth', profile);
-      eventBus.emit('users', Object.values(users));
-
-      recordAuditLog({
-        actorUid: profile.uid,
-        actorEmail: profile.email,
-        actorRole: profile.role,
-        action: 'auth.registered',
-        details: `New account registered (${cleanEmail})`
-      });
-
-      return profile;
-    } catch (fbErr: any) {
-      if (fbErr.code === 'auth/email-already-in-use') {
-        throw new Error('An account already exists with this email address. Please sign in instead.');
+  const cleanName = name.trim();
+  if (!auth) throw new Error('Firebase Authentication is unavailable. Check the Firebase configuration and network connection.');
+  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) throw new Error('Enter a valid email address.');
+  if (cleanName.length < 2) throw new Error('Enter your name (at least 2 characters).');
+  if (pass.length < 6) throw new Error('Choose a password with at least 6 characters.');
+  try {
+    const credential = await fbCreateUserWithEmail(auth, cleanEmail, pass);
+    await updateProfile(credential.user, { displayName: cleanName });
+    const profile = await loadAuthenticatedProfile(credential.user);
+    if (cleanEmail === PLATFORM_OWNER_EMAIL && !credential.user.emailVerified) {
+      try {
+        await fbSendEmailVerification(credential.user);
+        profile.ownerVerificationPending = true;
+        writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
+      } catch (verificationError) {
+        console.warn('Could not send owner email verification:', verificationError);
+        profile.ownerVerificationPending = true;
       }
-      if (fbErr.code === 'auth/weak-password') {
-        throw new Error('Password should be at least 6 characters.');
-      }
-      console.warn('Firebase signup note, continuing with resilient account creation:', fbErr.message);
     }
+    eventBus.emit('auth', profile);
+    return profile;
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Could not create your account. Please try again.');
   }
-
-  const isMaster = isProtectedOwner(cleanEmail);
-  const uid = isMaster ? 'admin_editpeakstudio' : `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const profile: UserProfile = {
-    uid,
-    email: cleanEmail,
-    displayName: cleanName,
-    role: isMaster ? 'master_admin' : 'user',
-    predefinedRole: isMaster ? 'owner' : undefined,
-    assignedRoleTitle: isMaster ? 'Platform Owner' : undefined,
-    permissions: isMaster ? SYSTEM_PERMISSIONS.map(p => p.key) : [],
-    isSuspended: false,
-    hasAllAccess: isMaster,
-    allowedCategories: [],
-    subscriptionStatus: isMaster ? 'active' : 'none',
-    lastLogin: new Date().toISOString(),
-    createdAt: new Date().toISOString()
-  };
-
-  const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-  users[uid] = profile;
-  writeStorage(STORAGE_KEYS.USERS, users);
-  writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
-  eventBus.emit('auth', profile);
-  eventBus.emit('users', Object.values(users));
-  return profile;
 }
 
 export async function sendPasswordReset(email: string): Promise<void> {
   const cleanEmail = email.trim().toLowerCase();
-  if (!cleanEmail || !cleanEmail.includes('@')) {
-    throw new Error('Please enter a valid email address.');
-  }
-
-  if (auth) {
-    try {
-      await fbSendPasswordResetEmail(auth, cleanEmail);
-      return;
-    } catch (err: any) {
-      console.warn('Firebase reset password note:', err);
-      if (err.code === 'auth/user-not-found') {
-        throw new Error('No registered account was found with this email.');
-      }
-      throw new Error(err.message || 'Failed to send password reset email.');
-    }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) throw new Error('Enter a valid email address.');
+  if (!auth) throw new Error('Firebase Authentication is unavailable. Check the Firebase configuration and network connection.');
+  try {
+    await fbSendPasswordResetEmail(auth, cleanEmail);
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Could not send the password reset email.');
   }
 }
 
 export async function logoutUser(): Promise<void> {
-  if (auth) {
-    try {
-      await fbSignOut(auth);
-    } catch (e) {
-      console.warn('Sign out note:', e);
-    }
-  }
+  if (auth) await fbSignOut(auth);
   writeStorage(STORAGE_KEYS.CURRENT_USER, null);
   eventBus.emit('auth', null);
-}
-
-// Quick switch for demonstration and testing in AI Studio
-export function switchSession(role: 'master_admin' | 'student'): UserProfile {
-  const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-  let profile: UserProfile;
-
-  if (role === 'master_admin') {
-    const adminId = 'admin_editpeakstudio';
-    profile = users[adminId] || {
-      uid: adminId,
-      email: MASTER_ADMIN_EMAIL,
-      displayName: 'Master Owner',
-      role: 'master_admin',
-      predefinedRole: 'owner',
-      assignedRoleTitle: 'Platform Owner',
-      permissions: SYSTEM_PERMISSIONS.map(p => p.key),
-      isSuspended: false,
-      hasAllAccess: true,
-      allowedCategories: [],
-      subscriptionStatus: 'active',
-      accessExpiry: '2036-12-31T23:59:59Z',
-      lastLogin: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    };
-    users[adminId] = profile;
-  } else {
-    // Student as seen in screenshot: factinfinity12@gmail.com
-    const studentId = 'MyaogSR2IkMCT6kZR1UO0gGAGP02';
-    profile = users[studentId] || {
-      uid: studentId,
-      email: 'factinfinity12@gmail.com',
-      displayName: 'Pintu Kumar',
-      role: 'user',
-      permissions: [],
-      isSuspended: false,
-      hasAllAccess: false,
-      allowedCategories: [],
-      subscriptionStatus: 'cancelled',
-      accessExpiry: '2026-10-18T00:00:00Z',
-      lastLogin: new Date().toISOString(),
-      createdAt: '2026-09-15T10:00:00Z'
-    };
-    users[studentId] = profile;
-  }
-
-  writeStorage(STORAGE_KEYS.USERS, users);
-  writeStorage(STORAGE_KEYS.CURRENT_USER, profile);
-  eventBus.emit('auth', profile);
-  eventBus.emit('users', Object.values(users));
-  return profile;
 }
 
 // ==========================================
@@ -847,15 +619,10 @@ export function subscribeToFolders(callback: (folders: Folder[]) => void): () =>
   if (db && isFirebaseOnline) {
     try {
       unsubFb = onSnapshot(collection(db, 'folders'), (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: Record<string, Folder> = {};
-          snapshot.forEach(docSnap => {
-            remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Folder;
-          });
-          writeStorage(STORAGE_KEYS.FOLDERS, remote);
-          const list = Object.values(remote).sort((a, b) => (a.order || 0) - (b.order || 0));
-          callback(list);
-        }
+        const remote: Record<string, Folder> = {};
+        snapshot.forEach(docSnap => { remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Folder; });
+        writeStorage(STORAGE_KEYS.FOLDERS, remote);
+        callback(Object.values(remote).sort((a, b) => (a.order || 0) - (b.order || 0)));
       }, (err) => {
         console.warn('Firestore folders snapshot warning:', err.message);
       });
@@ -908,19 +675,12 @@ export async function saveFolder(folderData: Partial<Folder> & { name: string })
     updatedAt: new Date().toISOString()
   };
 
+  await persistAdminDocument('folders', id, folder);
   folders[id] = folder;
   writeStorage(STORAGE_KEYS.FOLDERS, folders);
   recalculateFolderCounts();
   recalculateCategoryCounts();
   eventBus.emit('folders', Object.values(folders));
-
-  if (db && isFirebaseOnline) {
-    try {
-      await setDoc(doc(db, 'folders', id), folder, { merge: true });
-    } catch (e) {
-      console.warn('Remote folder sync note:', e);
-    }
-  }
 
   return folder;
 }
@@ -1283,16 +1043,11 @@ export function subscribeToCategories(callback: (categories: Category[]) => void
   if (db && isFirebaseOnline) {
     try {
       unsubFb = onSnapshot(collection(db, 'categories'), (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: Record<string, Category> = {};
-          snapshot.forEach(docSnap => {
-            remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Category;
-          });
-          writeStorage(STORAGE_KEYS.CATEGORIES, remote);
-          cleanupDuplicateCategories();
-          const list = Object.values(remote).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-          callback(list);
-        }
+        const remote: Record<string, Category> = {};
+        snapshot.forEach(docSnap => { remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Category; });
+        writeStorage(STORAGE_KEYS.CATEGORIES, remote);
+        cleanupDuplicateCategories();
+        callback(Object.values(remote).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
       }, (err) => {
         console.warn('Firestore categories snapshot warning:', err.message);
       });
@@ -1341,18 +1096,11 @@ export async function saveCategory(category: Partial<Category> & { name: string 
     createdAt: existing?.createdAt || new Date().toISOString()
   };
 
+  await persistAdminDocument('categories', id, updated);
   categories[id] = updated;
   writeStorage(STORAGE_KEYS.CATEGORIES, categories);
   recalculateCategoryCounts();
   eventBus.emit('categories', Object.values(categories));
-
-  if (db && isFirebaseOnline) {
-    try {
-      await setDoc(doc(db, 'categories', id), updated, { merge: true });
-    } catch (e) {
-      console.warn('Remote category sync note:', e);
-    }
-  }
 
   return updated;
 }
@@ -1361,17 +1109,11 @@ export async function toggleCategoryStatus(categoryId: string, isActive: boolean
   const categories = readStorage<Record<string, Category>>(STORAGE_KEYS.CATEGORIES, {});
   if (!categories[categoryId]) throw new Error(`Category ${categoryId} not found`);
 
+  await updateAdminDocument('categories', categoryId, { isActive });
   categories[categoryId].isActive = isActive;
   writeStorage(STORAGE_KEYS.CATEGORIES, categories);
   eventBus.emit('categories', Object.values(categories));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'categories', categoryId), { isActive });
-    } catch (e) {
-      console.warn('Remote category toggle status note:', e);
-    }
-  }
 }
 
 export async function reorderCategories(orderedIds: string[]): Promise<void> {
@@ -1493,35 +1235,44 @@ export async function deleteCategory(
 // VIDEOS / LESSONS SERVICE
 // ==========================================
 
-export function subscribeToVideos(callback: (videos: VideoLesson[]) => void): () => void {
+export function subscribeToVideos(callback: (videos: VideoLesson[]) => void, includeUnpublished = false): () => void {
   const loadLocal = () => {
     const map = readStorage<Record<string, VideoLesson>>(STORAGE_KEYS.VIDEOS, {});
-    const list = Object.values(map).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const list = Object.values(map).filter(video => includeUnpublished || video.isPublished).sort((a, b) => (a.order || 0) - (b.order || 0));
     callback(list);
   };
   loadLocal();
 
-  const unsubEvent = eventBus.subscribe<VideoLesson[]>('videos', callback);
+  const unsubEvent = eventBus.subscribe<VideoLesson[]>('videos', items => callback(items.filter(video => includeUnpublished || video.isPublished)));
 
   let unsubFb: (() => void) | null = null;
   if (db && isFirebaseOnline) {
-    try {
-      unsubFb = onSnapshot(collection(db, 'videos'), (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: Record<string, VideoLesson> = {};
-          snapshot.forEach(docSnap => {
-            remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as VideoLesson;
-          });
+    let cancelled = false;
+    const listeners: (() => void)[] = [];
+    const results: Record<number, Record<string, VideoLesson>> = {};
+    void getDoc(doc(db, 'users', auth?.currentUser?.uid || '')).then((userSnap) => {
+      if (cancelled) return;
+      const user = userSnap.exists() ? userSnap.data() : {};
+      const base = collection(db, 'videos');
+      const queries = includeUnpublished
+        ? [base]
+        : user.hasAllAccess === true
+          ? [query(base, where('isPublished', '==', true))]
+          : [query(base, where('isPublished', '==', true), where('isFreePreview', '==', true)),
+             ...((Array.isArray(user.allowedCategories) ? user.allowedCategories : []).map((id: string) =>
+               query(base, where('isPublished', '==', true), where('categoryId', '==', id))))];
+      queries.forEach((videosQuery, index) => {
+        listeners.push(onSnapshot(videosQuery, (snapshot) => {
+          results[index] = {};
+          snapshot.forEach(docSnap => { results[index][docSnap.id] = { id: docSnap.id, ...docSnap.data() } as VideoLesson; });
+          const remote = Object.assign({}, ...Object.values(results)) as Record<string, VideoLesson>;
           writeStorage(STORAGE_KEYS.VIDEOS, remote);
-          const list = Object.values(remote).sort((a, b) => (a.order || 0) - (b.order || 0));
-          callback(list);
-        }
-      }, (err) => {
-        console.warn('Firestore videos snapshot warning:', err.message);
+          callback(Object.values(remote).sort((a, b) => (a.order || 0) - (b.order || 0)));
+        }, (err) => console.warn('Firestore videos snapshot warning:', err.message)));
       });
-    } catch (e) {
-      console.warn('Firestore videos setup note:', e);
-    }
+      unsubFb = () => listeners.forEach(unsub => unsub());
+    }).catch((err) => console.warn('Firestore videos access setup warning:', err.message));
+    unsubFb = () => { cancelled = true; listeners.forEach(unsub => unsub()); };
   }
 
   return () => {
@@ -1556,19 +1307,12 @@ export async function saveVideo(video: Partial<VideoLesson> & { title: string; c
     updatedAt: new Date().toISOString()
   };
 
+  await persistAdminDocument('videos', id, updated);
   videos[id] = updated;
   writeStorage(STORAGE_KEYS.VIDEOS, videos);
   recalculateCategoryCounts();
   recalculateFolderCounts();
   eventBus.emit('videos', Object.values(videos));
-
-  if (db && isFirebaseOnline) {
-    try {
-      await setDoc(doc(db, 'videos', id), updated, { merge: true });
-    } catch (e) {
-      console.warn('Remote video sync note:', e);
-    }
-  }
 
   return updated;
 }
@@ -1577,69 +1321,66 @@ export async function toggleVideoPublish(videoId: string, isPublished: boolean):
   const videos = readStorage<Record<string, VideoLesson>>(STORAGE_KEYS.VIDEOS, {});
   if (!videos[videoId]) throw new Error(`Video ${videoId} not found`);
 
+  await updateAdminDocument('videos', videoId, { isPublished });
   videos[videoId].isPublished = isPublished;
   writeStorage(STORAGE_KEYS.VIDEOS, videos);
   eventBus.emit('videos', Object.values(videos));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'videos', videoId), { isPublished });
-    } catch (e) {
-      console.warn('Remote video toggle note:', e);
-    }
-  }
 }
 
 export async function deleteVideo(videoId: string): Promise<void> {
   const videos = readStorage<Record<string, VideoLesson>>(STORAGE_KEYS.VIDEOS, {});
+  if (!videos[videoId]) throw new Error('Video not found. Refresh the course list and try again.');
+  await deleteAdminDocument('videos', videoId);
   delete videos[videoId];
   writeStorage(STORAGE_KEYS.VIDEOS, videos);
   recalculateCategoryCounts();
   recalculateFolderCounts();
   eventBus.emit('videos', Object.values(videos));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await deleteDoc(doc(db, 'videos', videoId));
-    } catch (e) {
-      console.warn('Remote video delete note:', e);
-    }
-  }
 }
 
 // ==========================================
 // PDF RESOURCES SERVICE
 // ==========================================
 
-export function subscribeToPdfs(callback: (pdfs: PdfResource[]) => void): () => void {
+export function subscribeToPdfs(callback: (pdfs: PdfResource[]) => void, includeUnpublished = false): () => void {
   const loadLocal = () => {
     const map = readStorage<Record<string, PdfResource>>(STORAGE_KEYS.PDFS, {});
-    const list = Object.values(map).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const list = Object.values(map).filter(pdf => includeUnpublished || pdf.isPublished).sort((a, b) => (a.order || 0) - (b.order || 0));
     callback(list);
   };
   loadLocal();
 
-  const unsubEvent = eventBus.subscribe<PdfResource[]>('pdfs', callback);
+  const unsubEvent = eventBus.subscribe<PdfResource[]>('pdfs', items => callback(items.filter(pdf => includeUnpublished || pdf.isPublished)));
 
   let unsubFb: (() => void) | null = null;
   if (db && isFirebaseOnline) {
-    try {
-      unsubFb = onSnapshot(collection(db, 'pdfs'), (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: Record<string, PdfResource> = {};
-          snapshot.forEach(docSnap => {
-            remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as PdfResource;
-          });
+    let cancelled = false;
+    const listeners: (() => void)[] = [];
+    const results: Record<number, Record<string, PdfResource>> = {};
+    void getDoc(doc(db, 'users', auth?.currentUser?.uid || '')).then((userSnap) => {
+      if (cancelled) return;
+      const user = userSnap.exists() ? userSnap.data() : {};
+      const base = collection(db, 'pdfs');
+      const queries = includeUnpublished
+        ? [base]
+        : user.hasAllAccess === true
+          ? [query(base, where('isPublished', '==', true))]
+          : (Array.isArray(user.allowedCategories) ? user.allowedCategories : []).map((id: string) =>
+              query(base, where('isPublished', '==', true), where('categoryId', '==', id)));
+      queries.forEach((pdfsQuery, index) => {
+        listeners.push(onSnapshot(pdfsQuery, (snapshot) => {
+          results[index] = {};
+          snapshot.forEach(docSnap => { results[index][docSnap.id] = { id: docSnap.id, ...docSnap.data() } as PdfResource; });
+          const remote = Object.assign({}, ...Object.values(results)) as Record<string, PdfResource>;
           writeStorage(STORAGE_KEYS.PDFS, remote);
-          const list = Object.values(remote).sort((a, b) => (a.order || 0) - (b.order || 0));
-          callback(list);
-        }
-      }, (err) => {
-        console.warn('Firestore pdfs snapshot warning:', err.message);
+          callback(Object.values(remote).sort((a, b) => (a.order || 0) - (b.order || 0)));
+        }, (err) => console.warn('Firestore pdfs snapshot warning:', err.message)));
       });
-    } catch (e) {
-      console.warn('Firestore pdfs setup note:', e);
-    }
+      unsubFb = () => listeners.forEach(unsub => unsub());
+    }).catch((err) => console.warn('Firestore PDFs access setup warning:', err.message));
+    unsubFb = () => { cancelled = true; listeners.forEach(unsub => unsub()); };
   }
 
   return () => {
@@ -1673,19 +1414,12 @@ export async function savePdf(pdf: Partial<PdfResource> & { title: string; categ
     updatedAt: new Date().toISOString()
   };
 
+  await persistAdminDocument('pdfs', id, updated);
   pdfs[id] = updated;
   writeStorage(STORAGE_KEYS.PDFS, pdfs);
   recalculateCategoryCounts();
   recalculateFolderCounts();
   eventBus.emit('pdfs', Object.values(pdfs));
-
-  if (db && isFirebaseOnline) {
-    try {
-      await setDoc(doc(db, 'pdfs', id), updated, { merge: true });
-    } catch (e) {
-      console.warn('Remote pdf sync note:', e);
-    }
-  }
 
   return updated;
 }
@@ -1694,34 +1428,23 @@ export async function togglePdfPublish(pdfId: string, isPublished: boolean): Pro
   const pdfs = readStorage<Record<string, PdfResource>>(STORAGE_KEYS.PDFS, {});
   if (!pdfs[pdfId]) throw new Error(`PDF ${pdfId} not found`);
 
+  await updateAdminDocument('pdfs', pdfId, { isPublished });
   pdfs[pdfId].isPublished = isPublished;
   writeStorage(STORAGE_KEYS.PDFS, pdfs);
   eventBus.emit('pdfs', Object.values(pdfs));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'pdfs', pdfId), { isPublished });
-    } catch (e) {
-      console.warn('Remote pdf toggle note:', e);
-    }
-  }
 }
 
 export async function deletePdf(pdfId: string): Promise<void> {
   const pdfs = readStorage<Record<string, PdfResource>>(STORAGE_KEYS.PDFS, {});
+  if (!pdfs[pdfId]) throw new Error('PDF not found. Refresh the course list and try again.');
+  await deleteAdminDocument('pdfs', pdfId);
   delete pdfs[pdfId];
   writeStorage(STORAGE_KEYS.PDFS, pdfs);
   recalculateCategoryCounts();
   recalculateFolderCounts();
   eventBus.emit('pdfs', Object.values(pdfs));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await deleteDoc(doc(db, 'pdfs', pdfId));
-    } catch (e) {
-      console.warn('Remote pdf delete note:', e);
-    }
-  }
 }
 
 function recalculateCategoryCounts() {
@@ -1769,38 +1492,27 @@ function recalculateCategoryCounts() {
 // ==========================================
 
 export function subscribeToUsers(callback: (users: UserProfile[]) => void): () => void {
-  const loadLocal = () => {
-    const map = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-    callback(Object.values(map));
-  };
-  loadLocal();
-
-  const unsubEvent = eventBus.subscribe<UserProfile[]>('users', callback);
-
-  let unsubFb: (() => void) | null = null;
-  if (db && isFirebaseOnline) {
-    try {
-      unsubFb = onSnapshot(collection(db, 'users'), (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: Record<string, UserProfile> = {};
-          snapshot.forEach(docSnap => {
-            remote[docSnap.id] = { uid: docSnap.id, ...docSnap.data() } as UserProfile;
-          });
-          writeStorage(STORAGE_KEYS.USERS, remote);
-          callback(Object.values(remote));
-        }
-      }, (err) => {
-        console.warn('Firestore users snapshot warning:', err.message);
-      });
-    } catch (e) {
-      console.warn('Firestore users setup note:', e);
-    }
-  }
-
-  return () => {
-    unsubEvent();
-    if (unsubFb) unsubFb();
-  };
+  // Never hydrate another user's private profile cache into an unauthenticated/demo session.
+  callback([]);
+  if (!db || !isFirebaseOnline || !auth?.currentUser) return () => {};
+  let unsub: (() => void) | undefined;
+  let cancelled = false;
+  void getDoc(doc(db, 'users', auth.currentUser.uid)).then((actor) => {
+    if (cancelled) return;
+    const data = actor.exists() ? actor.data() : {};
+    const authorized = isCurrentAuthUserPlatformOwner() ||
+      ((data.role === 'admin' || data.role === 'master_admin') && data.isSuspended !== true);
+    if (!authorized) return;
+    unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const remote: UserProfile[] = [];
+      snapshot.forEach(docSnap => remote.push({ uid: docSnap.id, ...docSnap.data() } as UserProfile));
+      callback(remote);
+    }, (err) => {
+      console.warn('Firestore users snapshot warning:', err.message);
+      callback([]);
+    });
+  }).catch((err) => console.warn('Could not authorize users list:', err));
+  return () => { cancelled = true; unsub?.(); };
 }
 
 // Update admin role and permissions with security checks
@@ -1854,6 +1566,20 @@ export async function updateAdminRoleAndPermissions(
     target.subscriptionStatus = 'active';
   }
 
+  if (!db || !auth?.currentUser || auth.currentUser.uid !== actor.uid) throw new Error('A signed-in administrator and Firestore connection are required.');
+  try {
+    await updateDoc(doc(db, 'users', targetUid), {
+      role: target.role,
+      predefinedRole: target.predefinedRole ?? null,
+      assignedRoleTitle: target.assignedRoleTitle ?? null,
+      permissions: target.permissions,
+      hasAllAccess: target.hasAllAccess,
+      subscriptionStatus: target.subscriptionStatus
+    });
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Firebase rejected this role change. No local changes were saved.');
+  }
+
   writeStorage(STORAGE_KEYS.USERS, users);
 
   // Sync session if target is logged in
@@ -1875,21 +1601,6 @@ export async function updateAdminRoleAndPermissions(
     targetEmail: target.email,
     details: `Updated role to ${newRole} (${predefinedRole}) with ${permissions.length} permissions.`
   });
-
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'users', targetUid), {
-        role: target.role,
-        predefinedRole: target.predefinedRole,
-        assignedRoleTitle: target.assignedRoleTitle,
-        permissions: target.permissions,
-        hasAllAccess: target.hasAllAccess,
-        subscriptionStatus: target.subscriptionStatus
-      });
-    } catch (e) {
-      console.warn('Remote user role sync note:', e);
-    }
-  }
 
   return target;
 }
@@ -1919,6 +1630,9 @@ export async function toggleAdminSuspension(
     throw new Error('Permission denied: Only the platform Owner can suspend a Master Admin.');
   }
 
+  if (!db || !auth?.currentUser || auth.currentUser.uid !== actor.uid) throw new Error('A signed-in administrator and Firestore connection are required.');
+  try { await updateDoc(doc(db, 'users', targetUid), { isSuspended }); }
+  catch (err: any) { throw firebaseAuthMessage(err, 'Firebase rejected this suspension change. No local changes were saved.'); }
   target.isSuspended = isSuspended;
   writeStorage(STORAGE_KEYS.USERS, users);
 
@@ -1940,14 +1654,6 @@ export async function toggleAdminSuspension(
     targetEmail: target.email,
     details: `${isSuspended ? 'Suspended' : 'Reactivated'} administrative access for ${target.email}`
   });
-
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'users', targetUid), { isSuspended });
-    } catch (e) {
-      console.warn('Remote suspension sync note:', e);
-    }
-  }
 
   return target;
 }
@@ -1976,6 +1682,10 @@ export async function removeAdminPrivileges(
     throw new Error('Permission denied: Only the platform Owner can remove a Master Admin.');
   }
 
+  if (!db || !auth?.currentUser || auth.currentUser.uid !== actor.uid) throw new Error('A signed-in administrator and Firestore connection are required.');
+  try {
+    await updateDoc(doc(db, 'users', targetUid), { role: 'user', predefinedRole: null, assignedRoleTitle: null, permissions: [] });
+  } catch (err: any) { throw firebaseAuthMessage(err, 'Firebase rejected this role change. No local changes were saved.'); }
   target.role = 'user';
   target.predefinedRole = undefined;
   target.assignedRoleTitle = undefined;
@@ -2001,19 +1711,6 @@ export async function removeAdminPrivileges(
     details: `Revoked all administrative privileges from ${target.email}; returned to user role.`
   });
 
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'users', targetUid), {
-        role: 'user',
-        predefinedRole: null,
-        assignedRoleTitle: null,
-        permissions: []
-      });
-    } catch (e) {
-      console.warn('Remote remove admin note:', e);
-    }
-  }
-
   return target;
 }
 
@@ -2021,11 +1718,14 @@ export async function updateUserAllAccess(uid: string, hasAllAccess: boolean): P
   const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
   if (!users[uid]) throw new Error(`User ${uid} not found`);
 
+  if (!db || !auth?.currentUser) throw new Error('A signed-in administrator and Firestore connection are required.');
+  const subscriptionStatus = hasAllAccess ? 'active' : 'cancelled';
+  const accessExpiry = hasAllAccess ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null;
+  try { await updateDoc(doc(db, 'users', uid), { hasAllAccess, subscriptionStatus, accessExpiry }); }
+  catch (err: any) { throw firebaseAuthMessage(err, 'Firebase rejected this access change. No local changes were saved.'); }
   users[uid].hasAllAccess = hasAllAccess;
-  users[uid].subscriptionStatus = hasAllAccess ? 'active' : 'cancelled';
-  if (hasAllAccess) {
-    users[uid].accessExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-  }
+  users[uid].subscriptionStatus = subscriptionStatus;
+  users[uid].accessExpiry = accessExpiry || undefined;
 
   writeStorage(STORAGE_KEYS.USERS, users);
 
@@ -2037,17 +1737,6 @@ export async function updateUserAllAccess(uid: string, hasAllAccess: boolean): P
 
   eventBus.emit('users', Object.values(users));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'users', uid), { 
-        hasAllAccess, 
-        subscriptionStatus: users[uid].subscriptionStatus,
-        accessExpiry: users[uid].accessExpiry 
-      });
-    } catch (e) {
-      console.warn('Remote user all-access toggle note:', e);
-    }
-  }
 }
 
 export async function updateUserCategoryAccess(uid: string, categoryId: string, enabled: boolean): Promise<void> {
@@ -2061,7 +1750,11 @@ export async function updateUserCategoryAccess(uid: string, categoryId: string, 
     currentCats.delete(categoryId);
   }
 
-  users[uid].allowedCategories = Array.from(currentCats);
+  const allowedCategories = Array.from(currentCats);
+  if (!db || !auth?.currentUser) throw new Error('A signed-in administrator and Firestore connection are required.');
+  try { await updateDoc(doc(db, 'users', uid), { allowedCategories }); }
+  catch (err: any) { throw firebaseAuthMessage(err, 'Firebase rejected this category access change. No local changes were saved.'); }
+  users[uid].allowedCategories = allowedCategories;
   writeStorage(STORAGE_KEYS.USERS, users);
 
   const current = readStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
@@ -2072,15 +1765,6 @@ export async function updateUserCategoryAccess(uid: string, categoryId: string, 
 
   eventBus.emit('users', Object.values(users));
 
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'users', uid), { 
-        allowedCategories: users[uid].allowedCategories 
-      });
-    } catch (e) {
-      console.warn('Remote user category toggle note:', e);
-    }
-  }
 }
 
 export async function setAllCategoriesAccess(uid: string, enabled: boolean): Promise<void> {
@@ -2130,14 +1814,10 @@ export function subscribeToAuditLogs(callback: (logs: AuditLog[]) => void): () =
     try {
       const q = query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'));
       unsubFb = onSnapshot(q, (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: AuditLog[] = [];
-          snapshot.forEach(docSnap => {
-            remote.push({ id: docSnap.id, ...docSnap.data() } as AuditLog);
-          });
-          writeStorage(STORAGE_KEYS.AUDIT_LOGS, remote);
-          callback(remote);
-        }
+        const remote: AuditLog[] = [];
+        snapshot.forEach(docSnap => remote.push({ id: docSnap.id, ...docSnap.data() } as AuditLog));
+        writeStorage(STORAGE_KEYS.AUDIT_LOGS, remote);
+        callback(remote);
       }, (err) => {
         console.warn('Firestore audit logs snapshot note:', err.message);
       });
@@ -2185,40 +1865,51 @@ export async function recordAuditLog(data: Omit<AuditLog, 'id' | 'timestamp'>): 
 // ==========================================
 
 export function subscribeToPaymentRequests(callback: (requests: PaymentRequest[]) => void): () => void {
-  const loadLocal = () => {
-    const map = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
-    const list = Object.values(map).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-    callback(list);
-  };
-  loadLocal();
-
-  const unsubEvent = eventBus.subscribe<PaymentRequest[]>('payments', callback);
-
-  let unsubFb: (() => void) | null = null;
-  if (db && isFirebaseOnline) {
-    try {
-      unsubFb = onSnapshot(collection(db, 'paymentRequests'), (snapshot) => {
-        if (!snapshot.empty) {
-          const remote: Record<string, PaymentRequest> = {};
-          snapshot.forEach(docSnap => {
-            remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as PaymentRequest;
-          });
-          writeStorage(STORAGE_KEYS.PAYMENTS, remote);
-          const list = Object.values(remote).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-          callback(list);
-        }
-      }, (err) => {
-        console.warn('Firestore payment requests snapshot warning:', err.message);
-      });
-    } catch (e) {
-      console.warn('Firestore payment requests setup note:', e);
-    }
+  const uid = auth?.currentUser?.uid;
+  if (!uid || !db) {
+    callback([]);
+    return () => {};
   }
-
-  return () => {
-    unsubEvent();
-    if (unsubFb) unsubFb();
-  };
+  const cached = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
+  callback(Object.values(cached).filter(request => request.uid === uid).sort((a, b) =>
+    new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()));
+  let unsub: (() => void) | undefined;
+  let cancelled = false;
+  void (async () => {
+    const [ownProfile] = await Promise.all([
+      getDoc(doc(db, 'users', uid))
+    ]);
+    if (cancelled) return;
+    const ownData = ownProfile.exists() ? ownProfile.data() : {};
+    const canReadAll = isCurrentAuthUserPlatformOwner() ||
+      (ownData.role === 'master_admin' && ownData.isSuspended !== true) ||
+      (ownData.role === 'admin' && ownData.isSuspended !== true &&
+        Array.isArray(ownData.permissions) && ownData.permissions.includes('payments.verify'));
+    const requestsQuery = canReadAll
+      ? collection(db, 'paymentRequests')
+      : query(collection(db, 'paymentRequests'), where('uid', '==', uid));
+    unsub = onSnapshot(requestsQuery, (snapshot) => {
+    const remote: Record<string, PaymentRequest> = {};
+    snapshot.forEach(docSnap => {
+      const request = { id: docSnap.id, ...docSnap.data() } as PaymentRequest;
+      remote[docSnap.id] = request;
+    });
+    // Local cache can include other students' records from an earlier admin session.
+    const current = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
+    const safe = Object.values(current).filter(request => request.uid !== uid);
+    const merged = Object.fromEntries(safe.map(request => [request.id, request]));
+    Object.assign(merged, remote);
+    writeStorage(STORAGE_KEYS.PAYMENTS, merged);
+    callback(Object.values(remote).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()));
+    }, (err) => {
+    console.warn('Firestore payment requests snapshot warning:', err.message);
+    callback(Object.values(cached).filter(request => request.uid === uid));
+    });
+  })().catch((err) => {
+    console.warn('Could not authorize payment request list:', err);
+    callback([]);
+  });
+  return () => { cancelled = true; unsub?.(); };
 }
 
 export async function submitPaymentProof(data: {
@@ -2232,37 +1923,26 @@ export async function submitPaymentProof(data: {
   utr: string;
   proofUrl: string;
 }): Promise<PaymentRequest> {
-  const payments = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
+  if (!auth?.currentUser || auth.currentUser.uid !== data.uid) {
+    throw new Error('Sign in with a Firebase account to submit a payment request.');
+  }
+  if (!db || !isFirebaseOnline) throw new Error('Payment submission requires an active Firebase connection. Please try again online.');
+  if (!data.utr.trim()) throw new Error('Enter the transaction reference (UTR) before submitting.');
   const id = `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
   const request: PaymentRequest = {
-    id,
-    uid: data.uid,
-    userEmail: data.userEmail,
-    userName: data.userName,
-    planType: data.planType,
-    categoryId: data.categoryId,
-    categoryName: data.categoryName,
-    amount: data.amount,
-    utr: data.utr.trim(),
-    proofUrl: data.proofUrl,
-    status: 'pending',
-    submittedAt: new Date().toISOString()
+    id, uid: data.uid, userEmail: data.userEmail, userName: data.userName,
+    planType: data.planType, categoryId: data.categoryId, categoryName: data.categoryName,
+    amount: data.amount, utr: data.utr.trim(), proofUrl: data.proofUrl,
+    status: 'pending', submittedAt: new Date().toISOString()
   };
-
+  try {
+    await setDoc(doc(db, 'paymentRequests', id), request);
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Could not submit payment proof. Check the Firestore rules and try again.');
+  }
+  const payments = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
   payments[id] = request;
   writeStorage(STORAGE_KEYS.PAYMENTS, payments);
-  eventBus.emit('payments', Object.values(payments));
-
-  if (db && isFirebaseOnline) {
-    try {
-      await setDoc(doc(db, 'paymentRequests', id), request);
-      await setDoc(doc(db, 'payment_requests', id), request);
-    } catch (e) {
-      console.warn('Remote payment proof submission note:', e);
-    }
-  }
-
   return request;
 }
 
@@ -2272,87 +1952,88 @@ export async function resolvePaymentRequest(
   adminNote?: string,
   adminUser?: UserProfile | null
 ): Promise<void> {
-  const adminEmail = adminUser?.email || MASTER_ADMIN_EMAIL;
+  if (!db || !auth?.currentUser || !adminUser || auth.currentUser.uid !== adminUser.uid) {
+    throw new Error('A signed-in administrator is required to resolve payment requests.');
+  }
+  const requestRef = doc(db, 'paymentRequests', requestId);
+  const requestSnapshot = await getDoc(requestRef);
+  if (!requestSnapshot.exists()) throw new Error(`Payment request ${requestId} was not found in Firebase.`);
+  const req = { id: requestSnapshot.id, ...requestSnapshot.data() } as PaymentRequest;
+  if (req.status !== 'pending') throw new Error('This payment request has already been resolved. Refresh the list and try again.');
 
-  const payments = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
-  const req = payments[requestId];
-  if (!req) throw new Error(`Payment request ${requestId} not found`);
+  const now = new Date().toISOString();
+  const adminEmail = adminUser.email || '';
+  const batch = writeBatch(db);
+  batch.update(requestRef, { status, adminNote: adminNote || '', resolvedAt: now, resolvedBy: adminEmail });
+  let updatedStudent: UserProfile | undefined;
+  let sale: SalesRecord | undefined;
 
-  req.status = status;
-  req.adminNote = adminNote || '';
-  req.resolvedAt = new Date().toISOString();
-  req.resolvedBy = adminEmail;
-
-  payments[requestId] = req;
-  writeStorage(STORAGE_KEYS.PAYMENTS, payments);
-  eventBus.emit('payments', Object.values(payments));
-
-  // If approved, immediately unlock student access!
   if (status === 'approved') {
-    const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-    const targetUser = users[req.uid];
-    if (targetUser) {
-      if (req.planType === 'all_access') {
-        targetUser.hasAllAccess = true;
-        targetUser.subscriptionStatus = 'active';
-        targetUser.accessExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-      } else if (req.categoryId) {
-        const set = new Set(targetUser.allowedCategories || []);
-        set.add(req.categoryId);
-        targetUser.allowedCategories = Array.from(set);
-        targetUser.subscriptionStatus = 'active';
-      }
-      users[req.uid] = targetUser;
-      writeStorage(STORAGE_KEYS.USERS, users);
-      eventBus.emit('users', Object.values(users));
-
-      // Update current user session if it's the same user
-      const cur = readStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
-      if (cur && cur.uid === req.uid) {
-        writeStorage(STORAGE_KEYS.CURRENT_USER, targetUser);
-        eventBus.emit('auth', targetUser);
-      }
+    const studentRef = doc(db, 'users', req.uid);
+    const studentSnapshot = await getDoc(studentRef);
+    if (!studentSnapshot.exists()) throw new Error('The student profile is missing. Payment was not approved.');
+    updatedStudent = { uid: req.uid, ...studentSnapshot.data() } as UserProfile;
+    if (req.planType === 'all_access') {
+      updatedStudent.hasAllAccess = true;
+      updatedStudent.subscriptionStatus = 'active';
+      updatedStudent.accessExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (req.categoryId) {
+      updatedStudent.allowedCategories = Array.from(new Set([...(updatedStudent.allowedCategories || []), req.categoryId]));
+      updatedStudent.subscriptionStatus = 'active';
+    } else {
+      throw new Error('This category payment request is missing its category.');
     }
-
-    // Record sales entry
-    const sales = readStorage<Record<string, SalesRecord>>(STORAGE_KEYS.SALES, {});
+    batch.update(studentRef, {
+      hasAllAccess: updatedStudent.hasAllAccess,
+      allowedCategories: updatedStudent.allowedCategories,
+      subscriptionStatus: updatedStudent.subscriptionStatus,
+      accessExpiry: updatedStudent.accessExpiry || null
+    });
     const saleId = `sale_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    sales[saleId] = {
+    sale = {
       id: saleId,
       requestId: req.id,
       amount: req.amount,
       userEmail: req.userEmail,
       planType: req.planType === 'all_access' ? 'All-Access Pass' : (req.categoryName || 'Category Pass'),
       categoryName: req.categoryName,
-      date: new Date().toISOString()
+      date: now
     };
+    batch.set(doc(db, 'sales_analytics', saleId), sale);
+  }
+
+  try {
+    await batch.commit();
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Firebase rejected this payment update. No local changes were applied. Check administrator permissions and Firestore rules.');
+  }
+
+  const updatedRequest = { ...req, status, adminNote: adminNote || '', resolvedAt: now, resolvedBy: adminEmail };
+  const payments = readStorage<Record<string, PaymentRequest>>(STORAGE_KEYS.PAYMENTS, {});
+  payments[requestId] = updatedRequest;
+  writeStorage(STORAGE_KEYS.PAYMENTS, payments);
+  eventBus.emit('payments', Object.values(payments));
+  if (updatedStudent) {
+    const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
+    users[req.uid] = updatedStudent;
+    writeStorage(STORAGE_KEYS.USERS, users);
+    eventBus.emit('users', Object.values(users));
+  }
+  if (sale) {
+    const sales = readStorage<Record<string, SalesRecord>>(STORAGE_KEYS.SALES, {});
+    sales[sale.id] = sale;
     writeStorage(STORAGE_KEYS.SALES, sales);
     eventBus.emit('sales', Object.values(sales));
   }
-
-  // Record audit log
   await recordAuditLog({
-    actorUid: adminUser?.uid || 'system',
+    actorUid: adminUser.uid,
     actorEmail: adminEmail,
-    actorRole: adminUser?.role || 'admin',
+    actorRole: adminUser.role,
     action: status === 'approved' ? 'payment.approved' : 'payment.rejected',
     targetUid: req.uid,
     targetEmail: req.userEmail,
     details: `${status === 'approved' ? 'Approved' : 'Rejected'} payment of ₹${req.amount} for ${req.planType} (UTR: ${req.utr})`
   });
-
-  if (db && isFirebaseOnline) {
-    try {
-      await updateDoc(doc(db, 'paymentRequests', requestId), {
-        status,
-        adminNote: req.adminNote,
-        resolvedAt: req.resolvedAt,
-        resolvedBy: req.resolvedBy
-      });
-    } catch (e) {
-      console.warn('Remote payment resolve note:', e);
-    }
-  }
 }
 
 // ==========================================
