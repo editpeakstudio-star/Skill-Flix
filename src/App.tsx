@@ -79,11 +79,12 @@ function AppContent() {
     };
   }, []);
 
-  // Firebase-backed collections are subscribed only after Firebase Auth restores
-  // the real signed-in user; authorization is independently enforced by Firestore Rules.
+  // Public category listing is available before login.
+  // Private content and account data remain restricted to signed-in users.
   useEffect(() => {
+    const unsubCats = subscribeToCategories((cats) => setCategories(cats));
+
     if (!currentUser?.uid) {
-      setCategories([]);
       setFolders([]);
       setVideos([]);
       setPdfs([]);
@@ -92,19 +93,23 @@ function AppContent() {
       setSales([]);
       setAuditLogs([]);
       setSettings(DEFAULT_SETTINGS);
-      return;
+
+      return () => {
+        unsubCats();
+      };
     }
 
-    const unsubCats = subscribeToCategories((cats) => setCategories(cats));
     const unsubFolders = subscribeToFolders((flds) => setFolders(flds));
     const unsubSettings = subscribeToSettings((s) => setSettings(s));
     const unsubSales = subscribeToSales((sl) => setSales(sl));
     const unsubAudit = subscribeToAuditLogs((logs) => setAuditLogs(logs));
     const unsubUsers = subscribeToUsers(setUsers);
     const unsubPayments = subscribeToPaymentRequests(setPaymentRequests);
-    const canViewDrafts = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
+    const canViewDrafts =
+      currentUser.role === 'admin' || currentUser.role === 'master_admin';
     const unsubVideos = subscribeToVideos(setVideos, canViewDrafts);
     const unsubPdfs = subscribeToPdfs(setPdfs, canViewDrafts);
+
     return () => {
       unsubCats();
       unsubFolders();
