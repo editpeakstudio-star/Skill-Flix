@@ -8,7 +8,6 @@
         "@firebase/util": "^1.15.3",
         "@google/genai": "^2.4.0",
         "@tailwindcss/oxide": "^4.3.3",
-        "@tailwindcss/oxide-android-arm64": "^4.3.3",
         "@tailwindcss/vite": "^4.3.3",
         "canvas-confetti": "^1.9.4",
         "dotenv": "^17.2.3",
