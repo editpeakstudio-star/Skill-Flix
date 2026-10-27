@@ -265,7 +265,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                           {les.episode || `EP${index + 1}`}: {les.title}
                         </span>
                         <span className="text-[10px] text-slate-500 mt-1 block">
-                          {done ? 'Completed' : isCur ? 'Now playing' : 'Episode'} · {les.duration || '15 min'}
+                          {done ? 'Completed' : isCur ? 'Now playing' : (les.episode || `EP${index + 1}`)} · {les.duration || '15 min'}
                         </span>
                       </div>
                     </div>
