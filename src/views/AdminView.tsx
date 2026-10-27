@@ -3508,13 +3508,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-zinc-300 mb-1 font-semibold">Video URL (YouTube embed or MP4) *</label>
+                <label className="block text-zinc-300 mb-1 font-semibold">Video URL (YouTube, Vimeo or MP4) *</label>
                 <input
                   type="url"
                   required
                   value={editingVideo.videoUrl || ''}
                   onChange={e => setEditingVideo({ ...editingVideo, videoUrl: e.target.value })}
-                  placeholder="https://www.youtube.com/watch?v=..."
+                  placeholder="YouTube, Vimeo or MP4 URL"
                   className="w-full px-3 py-2 rounded-xl bg-[#05070D] border border-blue-500/25 text-white outline-none font-mono"
                 />
               </div>

@@ -57,6 +57,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       };
     }
 
+    // Vimeo URLs
+    const vimeoMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:player\.)?vimeo\.com\/(?:video\/)?(\d+)(?:\/([a-zA-Z0-9]+))?/);
+    if (vimeoMatch) {
+      const hash = vimeoMatch[2];
+      return {
+        type: 'vimeo',
+        src: `https://player.vimeo.com/video/${vimeoMatch[1]}${hash ? `?h=${hash}&autoplay=1` : '?autoplay=1'}`
+      };
+    }
+
     // Direct MP4 / WebM
     if (url.endsWith('.mp4') || url.endsWith('.webm') || url.includes('.mp4?') || url.includes('.webm?')) {
       return {
@@ -125,6 +135,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               title={video.title}
               className="w-full h-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          )}
+
+          {embed.type === 'vimeo' && (
+            <iframe
+              src={embed.src}
+              title={video.title}
+              className="w-full h-full border-0"
+              allow="autoplay; fullscreen; picture-in-picture"
               allowFullScreen
             />
           )}
