@@ -1727,9 +1727,19 @@ export async function removeAdminPrivileges(
 
 export async function updateUserAllAccess(uid: string, hasAllAccess: boolean): Promise<void> {
   const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-  if (!users[uid]) throw new Error(`User ${uid} not found`);
 
-  if (!db || !auth?.currentUser) throw new Error('A signed-in administrator and Firestore connection are required.');
+  if (!db || !auth?.currentUser) {
+    throw new Error('A signed-in administrator and Firestore connection are required.');
+  }
+
+  // If the target user is missing from local cache, load the real Firestore profile.
+  if (!users[uid]) {
+    const targetSnap = await getDoc(doc(db, 'users', uid));
+    if (!targetSnap.exists()) throw new Error(`User ${uid} not found`);
+    users[uid] = { ...targetSnap.data(), uid: targetSnap.id } as UserProfile;
+    writeStorage(STORAGE_KEYS.USERS, users);
+  }
+
   const subscriptionStatus = hasAllAccess ? 'active' : 'cancelled';
   const accessExpiry = hasAllAccess ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null;
   try { await updateDoc(doc(db, 'users', uid), { hasAllAccess, subscriptionStatus, accessExpiry }); }
@@ -1752,7 +1762,18 @@ export async function updateUserAllAccess(uid: string, hasAllAccess: boolean): P
 
 export async function updateUserCategoryAccess(uid: string, categoryId: string, enabled: boolean): Promise<void> {
   const users = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
-  if (!users[uid]) throw new Error(`User ${uid} not found`);
+
+  if (!db || !auth?.currentUser) {
+    throw new Error('A signed-in administrator and Firestore connection are required.');
+  }
+
+  // Recover the target user from Firestore if absent from local cache.
+  if (!users[uid]) {
+    const targetSnap = await getDoc(doc(db, 'users', uid));
+    if (!targetSnap.exists()) throw new Error(`User ${uid} not found`);
+    users[uid] = { ...targetSnap.data(), uid: targetSnap.id } as UserProfile;
+    writeStorage(STORAGE_KEYS.USERS, users);
+  }
 
   const currentCats = new Set(users[uid].allowedCategories || []);
   if (enabled) {
