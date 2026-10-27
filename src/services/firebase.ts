@@ -1505,7 +1505,18 @@ export function subscribeToUsers(callback: (users: UserProfile[]) => void): () =
     if (!authorized) return;
     unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
       const remote: UserProfile[] = [];
-      snapshot.forEach(docSnap => remote.push({ uid: docSnap.id, ...docSnap.data() } as UserProfile));
+      snapshot.forEach(docSnap => {
+        // Firestore document ID is the authoritative user UID.
+        remote.push({ ...docSnap.data(), uid: docSnap.id } as UserProfile);
+      });
+
+      // Cache remote users by their actual Firestore document IDs.
+      const cached = readStorage<Record<string, UserProfile>>(STORAGE_KEYS.USERS, {});
+      remote.forEach(user => {
+        cached[user.uid] = user;
+      });
+      writeStorage(STORAGE_KEYS.USERS, cached);
+
       callback(remote);
     }, (err) => {
       console.warn('Firestore users snapshot warning:', err.message);
