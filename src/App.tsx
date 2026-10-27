@@ -170,6 +170,7 @@ function AppContent() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         currentUser={currentUser}
+        settings={settings}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenSubscribe={() => handleOpenSubscribe()}
         onLogout={handleLogout}
@@ -234,6 +235,7 @@ function AppContent() {
             categories={categories}
             videos={videos}
             paymentRequests={paymentRequests}
+            settings={settings}
             onOpenSubscribe={() => handleOpenSubscribe()}
             onOpenAuth={() => setIsAuthOpen(true)}
             onNavigate={setCurrentView}
@@ -317,6 +319,7 @@ function AppContent() {
         isOpen={!!viewingPdf}
         onClose={() => setViewingPdf(null)}
         pdf={viewingPdf}
+        settings={settings}
         hasAccess={viewingPdf ? hasAccessToCategory(viewingPdf.categoryId) : false}
         onOpenSubscribe={() => {
           setViewingPdf(null);

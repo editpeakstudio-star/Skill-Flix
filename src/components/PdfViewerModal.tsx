@@ -1,11 +1,12 @@
 import React from 'react';
 import { X, FileText, Download, ExternalLink, ShieldCheck, Lock } from 'lucide-react';
-import { PdfResource } from '../types';
+import { PdfResource, PlatformSettings } from '../types';
 
 interface PdfViewerModalProps {
   isOpen: boolean;
   onClose: () => void;
   pdf: PdfResource | null;
+  settings: PlatformSettings;
   hasAccess: boolean;
   onOpenSubscribe: () => void;
 }
@@ -14,6 +15,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   isOpen,
   onClose,
   pdf,
+  settings,
   hasAccess,
   onOpenSubscribe
 }) => {
@@ -100,7 +102,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
                 onClick={onOpenSubscribe}
                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black text-xs font-bold shadow-md shadow-amber-500/20 transition-all"
               >
-                ⚡ Get All-Access Pass (₹999)
+                ⚡ Get All-Access Pass (₹{settings.allAccessPrice || 999})
               </button>
             </div>
           )}

@@ -11,12 +11,13 @@ import {
   ChevronDown,
   Sparkles
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, PlatformSettings } from '../types';
 
 interface NavbarProps {
   currentView: string;
   onNavigate: (view: string) => void;
   currentUser: UserProfile | null;
+  settings: PlatformSettings;
   onOpenAuth: () => void;
   onOpenSubscribe: () => void;
   onLogout: () => void;
@@ -26,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentView,
   onNavigate,
   currentUser,
+  settings,
   onOpenAuth,
   onOpenSubscribe,
   onLogout
@@ -128,7 +130,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-500 hover:to-yellow-600 text-black font-extrabold text-xs shadow-md transition-all cursor-pointer"
               >
                 <Crown className="w-3.5 h-3.5 fill-black text-black" />
-                <span>All-Access (₹999)</span>
+                <span>All-Access (₹{settings.allAccessPrice || 999})</span>
               </button>
             )}
 

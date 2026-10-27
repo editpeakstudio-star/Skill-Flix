@@ -13,7 +13,7 @@ import {
   ExternalLink,
   ChevronRight
 } from 'lucide-react';
-import { UserProfile, Category, VideoLesson, PaymentRequest } from '../types';
+import { UserProfile, Category, VideoLesson, PaymentRequest, PlatformSettings } from '../types';
 import { logoutUser, getWatchProgress } from '../services/firebase';
 import { useToast } from '../components/Toast';
 
@@ -22,6 +22,7 @@ interface ProfileViewProps {
   categories: Category[];
   videos: VideoLesson[];
   paymentRequests: PaymentRequest[];
+  settings: PlatformSettings;
   onOpenSubscribe: () => void;
   onOpenAuth: () => void;
   onNavigate: (view: string) => void;
@@ -32,6 +33,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   categories,
   videos,
   paymentRequests,
+  settings,
   onOpenSubscribe,
   onOpenAuth,
   onNavigate
@@ -176,7 +178,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs font-extrabold shadow-md transition-all shrink-0"
               >
                 <Crown className="w-4 h-4" />
-                <span>Get All-Access (₹999)</span>
+                <span>Get All-Access (₹{settings.allAccessPrice || 999})</span>
               </button>
             </div>
           </div>
