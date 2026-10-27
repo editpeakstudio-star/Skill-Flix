@@ -90,8 +90,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/95 backdrop-blur-xl overflow-y-auto">
-      <div className="relative w-full max-w-5xl bg-[#070B14] border border-blue-500/20 sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-screen sm:max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/95 backdrop-blur-xl overflow-hidden">
+      <div className="relative w-full max-w-5xl bg-[#070B14] border border-blue-500/20 sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh]">
         
         {/* Top bar */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/[0.08] bg-[#05070D]">
