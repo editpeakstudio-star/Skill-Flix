@@ -359,8 +359,6 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
 }
 
 export function subscribeToAuth(callback: (user: UserProfile | null) => void): () => void {
-  callback(null);
-
   const unsubStorage = eventBus.subscribe<UserProfile | null>('auth', (user) => {
     callback(user);
   });

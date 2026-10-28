@@ -45,6 +45,7 @@ function AppContent() {
 
   // Core application data states
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [videos, setVideos] = useState<VideoLesson[]>([]);
@@ -72,6 +73,7 @@ function AppContent() {
     const unsubAuth = subscribeToAuth((user) => {
       setCurrentUser(user);
       setCurrentView(user?.role === 'admin' || user?.role === 'master_admin' ? 'admin' : 'home');
+      setAuthReady(true);
     });
 
     return () => {
@@ -158,6 +160,14 @@ function AppContent() {
     if (currentUser?.hasAllAccess || currentUser?.role === 'master_admin' || currentUser?.role === 'admin') return true;
     return !!currentUser?.allowedCategories?.includes(catId);
   };
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-[#05070D] flex items-center justify-center" role="status" aria-label="Loading account">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#05070D] text-slate-100 flex flex-col font-['Plus_Jakarta_Sans']">
