@@ -3713,7 +3713,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   type="url"
                   value={editingCategory.thumbnailUrl || ''}
                   onChange={e => setEditingCategory({ ...editingCategory, thumbnailUrl: e.target.value })}
-                  placeholder="https://images.unsplash.com/..."
+                  placeholder="Paste direct image URL (ImgBB, Cloudinary, Firebase Storage, etc.)"
                   className="w-full px-3 py-2 rounded-xl bg-[#05070D] border border-blue-500/25 text-white outline-none font-mono"
                 />
                 {editingCategory.thumbnailUrl && (
