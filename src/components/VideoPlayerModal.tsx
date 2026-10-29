@@ -13,6 +13,7 @@ import {
 import { VideoLesson } from '../types';
 import { markLessonCompleted, getWatchProgress } from '../services/firebase';
 import { useToast } from './Toast';
+import { CustomVideoPlayer } from './CustomVideoPlayer';
 
 interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -53,6 +54,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     if (ytMatch) {
       return {
         type: 'youtube',
+        id: ytMatch[1],
         src: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0`
       };
     }
@@ -63,6 +65,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       const hash = vimeoMatch[2];
       return {
         type: 'vimeo',
+        id: vimeoMatch[1],
+        hash,
         src: `https://player.vimeo.com/video/${vimeoMatch[1]}${hash ? `?h=${hash}&autoplay=1` : '?autoplay=1'}`
       };
     }
@@ -82,7 +86,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     };
   };
 
-  const embed = getEmbedInfo(video.videoUrl);
+  const embed: { type: string; src: string; id?: string; hash?: string } = getEmbedInfo(video.videoUrl);
+  const isCustomPlayer = embed.type === 'youtube' || embed.type === 'vimeo' || embed.type === 'video';
 
   // Filter lessons belonging to the same category
   const categoryLessons = allLessons
@@ -128,33 +133,15 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         </div>
 
         {/* Video Player Area */}
-        <div className="relative w-full aspect-video shrink-0 bg-black flex items-center justify-center overflow-hidden">
-          {embed.type === 'youtube' && (
-            <iframe
-              src={embed.src}
+        <div className={`relative w-full shrink-0 bg-black ${isCustomPlayer ? '' : 'aspect-video flex items-center justify-center overflow-hidden'}`}>
+          {isCustomPlayer && (
+            <CustomVideoPlayer
+              key={video.id}
+              kind={embed.type as 'youtube' | 'vimeo' | 'video'}
+              src={embed.type === 'video' ? embed.src : (embed.id as string)}
+              vimeoHash={embed.hash}
               title={video.title}
-              className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
-          )}
-
-          {embed.type === 'vimeo' && (
-            <iframe
-              src={embed.src}
-              title={video.title}
-              className="w-full h-full border-0"
-              allow="autoplay; fullscreen; picture-in-picture"
-              allowFullScreen
-            />
-          )}
-
-          {embed.type === 'video' && (
-            <video
-              src={embed.src}
-              controls
-              autoPlay
-              className="w-full h-full object-contain"
+              fallbackSrc={embed.src}
             />
           )}
 
