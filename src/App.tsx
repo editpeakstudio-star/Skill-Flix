@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   UserProfile, 
   Category, 
   Folder,
   VideoLesson, 
+  VideoCatalogEntry,
   PdfResource, 
   PaymentRequest, 
   PlatformSettings, 
@@ -15,6 +16,7 @@ import {
   subscribeToCategories, 
   subscribeToFolders,
   subscribeToVideos, 
+  subscribeToVideoCatalog,
   subscribeToPdfs, 
   subscribeToUsers, 
   subscribeToPaymentRequests, 
@@ -31,6 +33,7 @@ import { Navbar } from './components/Navbar';
 import { SubscribeModal } from './components/SubscribeModal';
 import { AuthModal } from './components/AuthModal';
 import { VideoPlayerModal } from './components/VideoPlayerModal';
+import { VideoDetailsModal } from './components/VideoDetailsModal';
 import { PdfViewerModal } from './components/PdfViewerModal';
 import { HomeView } from './views/HomeView';
 import { CategoryDetailView } from './views/CategoryDetailView';
@@ -49,6 +52,7 @@ function AppContent() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [videos, setVideos] = useState<VideoLesson[]>([]);
+  const [videoCatalog, setVideoCatalog] = useState<VideoCatalogEntry[]>([]);
   const [pdfs, setPdfs] = useState<PdfResource[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
@@ -66,6 +70,7 @@ function AppContent() {
   const [subscribeCategoryTarget, setSubscribeCategoryTarget] = useState<Category | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<VideoLesson | null>(null);
+  const [previewVideo, setPreviewVideo] = useState<VideoLesson | null>(null);
   const [viewingPdf, setViewingPdf] = useState<PdfResource | null>(null);
 
   // Subscribe to real-time Firebase / persistence data
@@ -85,6 +90,7 @@ function AppContent() {
   // Private content and account data remain restricted to signed-in users.
   useEffect(() => {
     const unsubCats = subscribeToCategories((cats) => setCategories(cats));
+    const unsubCatalog = subscribeToVideoCatalog((entries) => setVideoCatalog(entries));
 
     if (!currentUser?.uid) {
       setFolders([]);
@@ -98,6 +104,7 @@ function AppContent() {
 
       return () => {
         unsubCats();
+        unsubCatalog();
       };
     }
 
@@ -114,6 +121,7 @@ function AppContent() {
 
     return () => {
       unsubCats();
+      unsubCatalog();
       unsubFolders();
       unsubSettings();
       unsubSales();
@@ -124,6 +132,44 @@ function AppContent() {
       unsubPdfs();
     };
   }, [currentUser?.uid]);
+
+  // Signed-out visitors (and students without an entitlement) still see the
+  // lesson list and its count. Those rows come from the public catalog and
+  // carry no playable URL, so playing always requires granted access.
+  const visibleVideos = useMemo<VideoLesson[]>(() => {
+    const merged = new Map<string, VideoLesson>();
+
+    videoCatalog.forEach((entry) => {
+      if (!entry.isPublished) return;
+      merged.set(entry.id, {
+        id: entry.id,
+        title: entry.title,
+        description: entry.description || '',
+        categoryId: entry.categoryId,
+        categoryName: entry.categoryName || '',
+        folderId: entry.folderId,
+        folderName: entry.folderName || '',
+        episode: entry.episode || '',
+        videoUrl: '',
+        thumbnailUrl: entry.thumbnailUrl || '',
+        duration: entry.duration || '',
+        isPublished: true,
+        isFreePreview: entry.isFreePreview === true,
+        order: entry.order,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        isCatalogOnly: true
+      });
+    });
+
+    // A lesson the viewer is entitled to replaces its catalog row, adding the URL.
+    videos.forEach((video) => merged.set(video.id, video));
+
+    const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
+    return Array.from(merged.values())
+      .filter((video) => isAdmin || video.isPublished)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [videos, videoCatalog, currentUser?.role]);
 
   const handleOpenSubscribe = (cat?: Category) => {
     setSubscribeCategoryTarget(cat || null);
@@ -192,7 +238,7 @@ function AppContent() {
           <HomeView
             categories={categories}
             folders={folders}
-            videos={videos}
+            videos={visibleVideos}
             currentUser={currentUser}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
@@ -207,11 +253,12 @@ function AppContent() {
           <CategoryDetailView
             category={categories.find(c => c.id === selectedCategory.id) || selectedCategory}
             folders={folders}
-            videos={videos}
+            videos={visibleVideos}
             pdfs={pdfs}
             currentUser={currentUser}
             onBack={() => setCurrentView('home')}
             onPlayVideo={(v) => setPlayingVideo(v)}
+            onPreviewVideo={(v) => setPreviewVideo(v)}
             onViewPdf={(p) => setViewingPdf(p)}
             onOpenSubscribe={handleOpenSubscribe}
           />
@@ -219,11 +266,12 @@ function AppContent() {
 
         {currentView === 'videos' && (
           <VideosView
-            videos={videos}
+            videos={visibleVideos}
             categories={categories}
             currentUser={currentUser}
             searchQuery={searchQuery}
             onPlayVideo={(v) => setPlayingVideo(v)}
+            onPreviewVideo={(v) => setPreviewVideo(v)}
             onOpenSubscribe={handleOpenSubscribe}
           />
         )}
@@ -243,7 +291,7 @@ function AppContent() {
           <ProfileView
             currentUser={currentUser}
             categories={categories}
-            videos={videos}
+            videos={visibleVideos}
             paymentRequests={paymentRequests}
             settings={settings}
             onOpenSubscribe={() => handleOpenSubscribe()}
@@ -323,6 +371,23 @@ function AppContent() {
         video={playingVideo}
         allLessons={videos}
         onSelectVideo={(v) => setPlayingVideo(v)}
+      />
+
+      <VideoDetailsModal
+        video={previewVideo}
+        category={previewVideo ? categories.find(c => c.id === previewVideo.categoryId) || null : null}
+        isSignedIn={!!currentUser?.uid}
+        isUnlocked={previewVideo ? hasAccessToCategory(previewVideo.categoryId) : false}
+        onClose={() => setPreviewVideo(null)}
+        onUnlock={() => {
+          const target = previewVideo ? categories.find(c => c.id === previewVideo.categoryId) || null : null;
+          setPreviewVideo(null);
+          handleOpenSubscribe(target || undefined);
+        }}
+        onSignIn={() => {
+          setPreviewVideo(null);
+          setIsAuthOpen(true);
+        }}
       />
 
       <PdfViewerModal

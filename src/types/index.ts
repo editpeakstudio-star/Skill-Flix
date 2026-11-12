@@ -130,6 +130,31 @@ export interface VideoLesson {
   order: number;
   createdAt: string;
   updatedAt?: string;
+  /** True when this row came from the public catalog and carries no playable URL. */
+  isCatalogOnly?: boolean;
+}
+
+/**
+ * Public, non-playable listing of a lesson. Stored in the `videoCatalog`
+ * collection so visitors who are not signed in can see that a course has
+ * lessons (and how many) without granting playback.
+ */
+export interface VideoCatalogEntry {
+  id: string;
+  title: string;
+  description?: string;
+  categoryId: string;
+  categoryName?: string;
+  folderId?: string;
+  folderName?: string;
+  episode?: string;
+  duration?: string;
+  thumbnailUrl?: string;
+  isPublished: boolean;
+  isFreePreview: boolean;
+  order: number;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface PdfResource {

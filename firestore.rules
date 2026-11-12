@@ -67,6 +67,22 @@ service cloud.firestore {
         && request.resource.data.pageCount is number
         && request.resource.data.createdAt is string;
     }
+    // Descriptive listing of a lesson. Deliberately has no `videoUrl` field:
+    // the playable link stays in `videos`, which requires an entitlement.
+    function validCatalogEntry(id) {
+      return request.resource.data.id == id
+        && request.resource.data.title is string
+        && request.resource.data.categoryId is string
+        && request.resource.data.order is number
+        && request.resource.data.isPublished is bool
+        && request.resource.data.isFreePreview is bool
+        && request.resource.data.createdAt is string
+        && request.resource.data.keys().hasOnly([
+          'id','title','description','categoryId','categoryName','folderId','folderName',
+          'episode','duration','thumbnailUrl','isPublished','isFreePreview','order',
+          'createdAt','updatedAt'
+        ]);
+    }
     function ownsEntitlement(categoryId) {
       return signedIn() && exists(userPath(request.auth.uid))
         && (get(userPath(request.auth.uid)).data.hasAllAccess == true
@@ -137,7 +153,7 @@ service cloud.firestore {
     }
 
     match /categories/{id} {
-      allow read: if signedIn();
+      allow read: if signedIn() || resource.data.isActive == true;
       allow create: if permitted('folders.create') && validCategory(id);
       allow update: if permitted('folders.edit') && validCategory(id);
       allow delete: if permitted('folders.delete');
@@ -152,6 +168,12 @@ service cloud.firestore {
       allow read: if canReadVideo();
       allow create: if permitted('videos.create') && validVideo(id);
       allow update: if permitted('videos.edit') && validVideo(id);
+      allow delete: if permitted('videos.delete');
+    }
+    match /videoCatalog/{id} {
+      allow get, list: if resource.data.isPublished == true;
+      allow create, update: if (permitted('videos.create') || permitted('videos.edit'))
+        && validCatalogEntry(id);
       allow delete: if permitted('videos.delete');
     }
     match /pdfs/{id} {

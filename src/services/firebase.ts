@@ -47,6 +47,7 @@ import {
   AuditLog,
   SYSTEM_PERMISSIONS
 } from '../types';
+import type { VideoCatalogEntry } from '../types';
 
 export const DEFAULT_UPI_ID = 'rg570251-1@oksbi';
 const PLATFORM_OWNER_EMAIL = 'editpeakstudio@gmail.com';
@@ -89,6 +90,7 @@ const STORAGE_KEYS = {
   FOLDERS: 'skillflix_folders',
   CATEGORIES: 'skillflix_categories',
   VIDEOS: 'skillflix_videos',
+  VIDEO_CATALOG: 'skillflix_video_catalog',
   PDFS: 'skillflix_pdfs',
   PAYMENTS: 'skillflix_payment_requests',
   SETTINGS: 'skillflix_settings',
@@ -1040,7 +1042,12 @@ export function subscribeToCategories(callback: (categories: Category[]) => void
   let unsubFb: (() => void) | null = null;
   if (db && isFirebaseOnline) {
     try {
-      unsubFb = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      // Signed-out visitors may only list the active courses, so the query must
+      // match the public read rule instead of the full collection.
+      const categoriesQuery = auth?.currentUser
+        ? collection(db, 'categories')
+        : query(collection(db, 'categories'), where('isActive', '==', true));
+      unsubFb = onSnapshot(categoriesQuery, (snapshot) => {
         const remote: Record<string, Category> = {};
         snapshot.forEach(docSnap => { remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Category; });
         writeStorage(STORAGE_KEYS.CATEGORIES, remote);
@@ -1279,6 +1286,119 @@ export function subscribeToVideos(callback: (videos: VideoLesson[]) => void, inc
   };
 }
 
+// ==========================================
+// PUBLIC VIDEO CATALOG (listing before sign-in)
+// ==========================================
+// A `videos` document contains the playable `videoUrl`, so those documents stay
+// restricted to entitled students. `videoCatalog` mirrors only the descriptive
+// fields, which lets a visitor who is not signed in see that a course has
+// lessons (and how many) without ever receiving a playable link.
+
+export function toCatalogEntry(video: VideoLesson): VideoCatalogEntry {
+  return {
+    id: video.id,
+    title: video.title,
+    description: video.description || '',
+    categoryId: video.categoryId,
+    categoryName: video.categoryName || '',
+    folderId: video.folderId,
+    folderName: video.folderName || '',
+    episode: video.episode || '',
+    duration: video.duration || '',
+    thumbnailUrl: video.thumbnailUrl || '',
+    isPublished: video.isPublished !== false,
+    isFreePreview: video.isFreePreview === true,
+    order: typeof video.order === 'number' ? video.order : 0,
+    createdAt: video.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+export function subscribeToVideoCatalog(callback: (entries: VideoCatalogEntry[]) => void): () => void {
+  const emitLocal = () => {
+    const map = readStorage<Record<string, VideoCatalogEntry>>(STORAGE_KEYS.VIDEO_CATALOG, {});
+    callback(Object.values(map).filter(entry => entry.isPublished).sort((a, b) => (a.order || 0) - (b.order || 0)));
+  };
+  emitLocal();
+
+  const unsubEvent = eventBus.subscribe<VideoCatalogEntry[]>('video_catalog', entries => callback(entries));
+
+  let unsubFb: (() => void) | null = null;
+  if (db && isFirebaseOnline) {
+    try {
+      // The read rule is evaluated per document, so the query has to be
+      // constrained the same way (Firestore rules are not filters).
+      unsubFb = onSnapshot(query(collection(db, 'videoCatalog'), where('isPublished', '==', true)), (snapshot) => {
+        const remote: Record<string, VideoCatalogEntry> = {};
+        snapshot.forEach(docSnap => { remote[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as VideoCatalogEntry; });
+        writeStorage(STORAGE_KEYS.VIDEO_CATALOG, remote);
+        const list = Object.values(remote).filter(entry => entry.isPublished).sort((a, b) => (a.order || 0) - (b.order || 0));
+        eventBus.emit('video_catalog', list);
+        callback(list);
+      }, (err) => {
+        console.warn('Public catalog snapshot note:', err.message);
+      });
+    } catch (e) {
+      console.warn('Public catalog setup note:', e);
+    }
+  }
+
+  return () => {
+    unsubEvent();
+    if (unsubFb) unsubFb();
+  };
+}
+
+async function syncVideoCatalogEntry(video: VideoLesson): Promise<void> {
+  if (!db || !auth?.currentUser) return;
+  const entry = toCatalogEntry(video);
+  try {
+    if (entry.isPublished) {
+      await setDoc(doc(db, 'videoCatalog', entry.id), entry);
+    } else {
+      await deleteDoc(doc(db, 'videoCatalog', entry.id));
+    }
+  } catch (e) {
+    console.warn('Public catalog sync note:', e);
+  }
+}
+
+async function removeVideoCatalogEntry(videoId: string): Promise<void> {
+  if (!db || !auth?.currentUser) return;
+  try {
+    await deleteDoc(doc(db, 'videoCatalog', videoId));
+  } catch (e) {
+    console.warn('Public catalog removal note:', e);
+  }
+}
+
+/**
+ * Publishes the signed-out catalog for every lesson that already exists, so a
+ * course shows its lesson count before anyone signs in. Safe to run repeatedly.
+ */
+export async function publishVideoCatalog(): Promise<number> {
+  if (!db || !auth?.currentUser) {
+    throw new Error('Sign in as an authorized administrator with an active Firebase connection to publish the catalog.');
+  }
+  let synced = 0;
+  try {
+    const snapshot = await getDocs(collection(db, 'videos'));
+    for (const docSnap of snapshot.docs) {
+      const video = { id: docSnap.id, ...docSnap.data() } as VideoLesson;
+      const entry = toCatalogEntry(video);
+      if (entry.isPublished) {
+        await setDoc(doc(db, 'videoCatalog', entry.id), entry);
+        synced++;
+      } else {
+        await deleteDoc(doc(db, 'videoCatalog', entry.id));
+      }
+    }
+  } catch (err: any) {
+    throw firebaseAuthMessage(err, 'Firebase rejected the public catalog publish. Check administrator permissions and Firestore rules.');
+  }
+  return synced;
+}
+
 export async function saveVideo(video: Partial<VideoLesson> & { title: string; categoryId: string }): Promise<VideoLesson> {
   const videos = readStorage<Record<string, VideoLesson>>(STORAGE_KEYS.VIDEOS, {});
   const id = video.id || `vid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -1311,6 +1431,7 @@ export async function saveVideo(video: Partial<VideoLesson> & { title: string; c
   recalculateCategoryCounts();
   recalculateFolderCounts();
   eventBus.emit('videos', Object.values(videos));
+  void syncVideoCatalogEntry(updated);
 
   return updated;
 }
@@ -1323,6 +1444,7 @@ export async function toggleVideoPublish(videoId: string, isPublished: boolean):
   videos[videoId].isPublished = isPublished;
   writeStorage(STORAGE_KEYS.VIDEOS, videos);
   eventBus.emit('videos', Object.values(videos));
+  void syncVideoCatalogEntry(videos[videoId]);
 
 }
 
@@ -1335,6 +1457,7 @@ export async function deleteVideo(videoId: string): Promise<void> {
   recalculateCategoryCounts();
   recalculateFolderCounts();
   eventBus.emit('videos', Object.values(videos));
+  void removeVideoCatalogEntry(videoId);
 
 }
 

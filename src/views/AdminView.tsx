@@ -91,7 +91,8 @@ import {
   updateSettings,
   validateIndianMobile,
   logoutUser,
-  recordAuditLog
+  recordAuditLog,
+  publishVideoCatalog
 } from '../services/firebase';
 import { useToast } from '../components/Toast';
 
@@ -187,12 +188,47 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Settings form
   const [settingsForm, setSettingsForm] = useState<PlatformSettings>(settings);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isPublishingCatalog, setIsPublishingCatalog] = useState(false);
+
+  const handlePublishCatalog = async () => {
+    setIsPublishingCatalog(true);
+    try {
+      const count = await publishVideoCatalog();
+      showToast(`Published ${count} lesson(s) to the public catalog.`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Could not publish the public catalog.', 'error');
+    } finally {
+      setIsPublishingCatalog(false);
+    }
+  };
 
   useEffect(() => {
     if (settings) {
       setSettingsForm(settings);
     }
   }, [settings]);
+
+  // Keeps the public lesson catalog in sync the first time an administrator
+  // opens the panel in a session, so a signed-out visitor never sees 0 videos
+  // for a course that actually has lessons.
+  useEffect(() => {
+    const isAdminUser = currentUser.role === 'admin' || currentUser.role === 'master_admin';
+    if (!isAdminUser || currentUser.isSuspended) return;
+    try {
+      if (sessionStorage.getItem('skillflix_catalog_synced') === '1') return;
+      sessionStorage.setItem('skillflix_catalog_synced', '1');
+    } catch {
+      // Private-mode storage failures must not block the sync attempt.
+    }
+    publishVideoCatalog()
+      .then((count) => {
+        if (count > 0) showToast(`Public lesson catalog synced (${count} lessons).`, 'info');
+      })
+      .catch(() => {
+        // Non-fatal: the manual "Publish Lesson Catalog Now" button remains.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.uid]);
 
   // Check authorization & status
   const isOwner = isProtectedOwner(currentUser);
@@ -2598,6 +2634,22 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-bold text-xs cursor-pointer"
                 >
                   Initialize Suites & Folders Now
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#05070D] border border-zinc-800 space-y-2">
+                <span className="text-xs font-bold text-white block">Publish Public Lesson Catalog</span>
+                <p className="text-[11px] text-zinc-400">
+                  Lets visitors see every course's lesson list and lesson count before signing in. Only titles,
+                  durations and thumbnails are published — playable links stay protected.
+                </p>
+                <button
+                  type="button"
+                  onClick={handlePublishCatalog}
+                  disabled={isPublishingCatalog}
+                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-xs cursor-pointer"
+                >
+                  {isPublishingCatalog ? 'Publishing...' : 'Publish Lesson Catalog Now'}
                 </button>
               </div>
             </div>

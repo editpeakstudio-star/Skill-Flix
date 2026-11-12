@@ -28,6 +28,7 @@ interface CategoryDetailViewProps {
   currentUser: UserProfile | null;
   onBack: () => void;
   onPlayVideo: (video: VideoLesson) => void;
+  onPreviewVideo: (video: VideoLesson) => void;
   onViewPdf: (pdf: PdfResource) => void;
   onOpenSubscribe: (cat?: Category) => void;
 }
@@ -40,6 +41,7 @@ export const CategoryDetailView: React.FC<CategoryDetailViewProps> = ({
   currentUser,
   onBack,
   onPlayVideo,
+  onPreviewVideo,
   onViewPdf,
   onOpenSubscribe
 }) => {
@@ -114,11 +116,11 @@ export const CategoryDetailView: React.FC<CategoryDetailViewProps> = ({
   }, [pdfs, category.id, isAdmin, selectedFolderId, searchQuery]);
 
   const handleVideoClick = (video: VideoLesson) => {
-    const canWatch = isCategoryUnlocked || video.isFreePreview;
+    const canWatch = !video.isCatalogOnly && (isCategoryUnlocked || video.isFreePreview);
     if (canWatch) {
       onPlayVideo(video);
     } else {
-      onOpenSubscribe(category);
+      onPreviewVideo(video);
     }
   };
 
@@ -228,7 +230,7 @@ export const CategoryDetailView: React.FC<CategoryDetailViewProps> = ({
                 {/* Video and PDF Count Metrics */}
                 <div className="flex items-center gap-3 text-xs text-zinc-400 mt-2 font-medium">
                   <span className="text-cyan-300 font-semibold">
-                    {totalCategoryVideos} {totalCategoryVideos === 1 ? 'Video' : 'Videos'}
+                    {totalCategoryVideos} {totalCategoryVideos === 1 ? 'Video' : 'Videos'} Available
                   </span>
                   <span>•</span>
                   <span>{totalCategoryPdfs} {totalCategoryPdfs === 1 ? 'PDF Guide' : 'PDF Guides'}</span>
@@ -340,7 +342,8 @@ export const CategoryDetailView: React.FC<CategoryDetailViewProps> = ({
           /* Clean 2-column mobile grid, scaling to 3 and 4 columns on desktop */
           <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
             {displayedVideos.map((video) => {
-              const canWatch = isCategoryUnlocked || video.isFreePreview;
+            const isCatalogRow = video.isCatalogOnly === true;
+            const canWatch = !isCatalogRow && (isCategoryUnlocked || video.isFreePreview);
 
               return (
                 <div

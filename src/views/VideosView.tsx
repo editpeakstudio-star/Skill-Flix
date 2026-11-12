@@ -8,6 +8,7 @@ interface VideosViewProps {
   currentUser: UserProfile | null;
   searchQuery: string;
   onPlayVideo: (video: VideoLesson) => void;
+  onPreviewVideo: (video: VideoLesson) => void;
   onOpenSubscribe: (cat?: Category) => void;
 }
 
@@ -17,6 +18,7 @@ export const VideosView: React.FC<VideosViewProps> = ({
   currentUser,
   searchQuery,
   onPlayVideo,
+  onPreviewVideo,
   onOpenSubscribe
 }) => {
   const [selectedCatId, setSelectedCatId] = useState<string>('all');
@@ -92,7 +94,7 @@ export const VideosView: React.FC<VideosViewProps> = ({
       {filteredVideos.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {filteredVideos.map((video) => {
-            const unlocked = isUnlocked(video.categoryId) || video.isFreePreview;
+            const unlocked = !video.isCatalogOnly && (isUnlocked(video.categoryId) || video.isFreePreview);
             const categoryObj = categories.find(c => c.id === video.categoryId);
 
             return (
@@ -102,7 +104,7 @@ export const VideosView: React.FC<VideosViewProps> = ({
                   if (unlocked) {
                     onPlayVideo(video);
                   } else {
-                    onOpenSubscribe(categoryObj);
+                    onPreviewVideo(video);
                   }
                 }}
                 className="group rounded-2xl bg-[#090D18] border border-white/[0.08] hover:border-blue-500/40 overflow-hidden shadow-lg transition-all duration-200 cursor-pointer flex flex-col justify-between"
